@@ -55,14 +55,17 @@ describe('secret keys', () => {
 
   it('rejects a secret that does not match the saved address', () => {
     const [a, b] = vectors.derivation;
-    expect(() => walletFromSecret(a.secret, b.address)).toThrow();
+    expect(() => walletFromSecret(a.secret, b.address)).toThrow('The secret key does not belong to this account.');
   });
 });
 
 describe('wallet file', () => {
   const w = vectors.walletFiles;
+  // Hundreds of thousands of PBKDF2 rounds take seconds, more on a busy machine or CI runner than
+  // the default 5-second limit.
+  const SLOW = 30_000;
   for (const name of ['iter200000', 'iter1000'] as const) {
-    it(`opens a file from the previous version (${name})`, () => {
+    it(`opens a file from the previous version (${name})`, {timeout: SLOW}, () => {
       const data = decryptWallet(w.password, w[name]);
       expect(data.address).toBe(w.expected.address);
       expect(data.secret).toBe(w.expected.secret);
@@ -82,7 +85,7 @@ describe('wallet file', () => {
     expect(() => decryptWallet('wrong', w.iter1000)).toThrow('Wallet file or password is wrong.');
   });
 
-  it('writes files that decrypt to the same data with 600,000 PBKDF2 iterations', () => {
+  it('writes files that decrypt to the same data with 600,000 PBKDF2 iterations', {timeout: SLOW}, () => {
     const data = decryptWallet(w.password, w.iter1000);
     const blob = encryptWallet(w.password, data);
     expect(walletIterations(blob)).toBe(600000);
@@ -90,7 +93,7 @@ describe('wallet file', () => {
     expect(decryptWallet(w.password, blob)).toEqual(data);
   });
 
-  it('writes files the previous version can open (sjcl with the same key format)', () => {
+  it('writes files the previous version can open (sjcl with the same key format)', {timeout: SLOW}, () => {
     const data = decryptWallet(w.password, w.iter1000);
     const blob = encryptWallet(w.password, data);
     const plain = JSON.parse(sjcl.decrypt(`${w.password.length}|${w.password}`, atob(blob)));
@@ -104,7 +107,7 @@ describe('wallet file', () => {
     expect(Object.keys(cache())).toEqual([]);
     encryptWallet(w.password, decryptWallet(w.password, w.iter1000), 1000);
     expect(Object.keys(cache())).toEqual([]);
-    expect(() => decryptWallet('wrong', w.iter1000)).toThrow();
+    expect(() => decryptWallet('wrong', w.iter1000)).toThrow('Wallet file or password is wrong.');
     expect(Object.keys(cache())).toEqual([]);
   });
 });

@@ -37,7 +37,7 @@ export function Swap() {
   const [found, setFound] = useState(false);
   const [error, setError] = useState('');
   const [lastUpdate, setLastUpdate] = useState<number | null>(null);
-  const [now, setNow] = useState(Date.now());
+  const [now, setNow] = useState(() => Date.now());
   const [chosen, setChosen] = useState<Option | null>(null);
   const debouncedAmount = useDebounced(amount.trim());
 

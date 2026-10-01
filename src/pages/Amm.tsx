@@ -60,7 +60,7 @@ export function Amm() {
     b: initialPair.counter_issuer ? assetKey(realCode(initialPair.counter_code), initialPair.counter_issuer) : nativeCode
   }));
   const asset = useCallback((key: string) => assets.find(a => a.key === key) || {key: nativeCode, code: nativeCode, issuer: null, label: nativeCode}, [assets, nativeCode]);
-  const ledger = (a: PoolAsset) => ({currency: a.code === nativeCode ? 'XRP' : a.code, issuer: a.issuer || undefined});
+  const ledger = useCallback((a: PoolAsset) => ({currency: a.code === nativeCode ? 'XRP' : a.code, issuer: a.issuer || undefined}), [nativeCode]);
   const sameAsset = pair.a === pair.b;
 
   const [amm, setAmm] = useState<AmmInfo | null>(null);
@@ -77,7 +77,7 @@ export function Amm() {
     setAmm(data);
     setLoading(false);
     setLoaded(true);
-  }, [pair, sameAsset, asset]);
+  }, [pair, sameAsset, asset, ledger]);
 
   useEffect(() => {
     void refresh();

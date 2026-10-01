@@ -209,7 +209,7 @@ async function wix(args) {
   try {
     execFileSync('wix', ['--version'], {stdio: 'ignore'});
     return run('wix', args);
-  } catch (e) {
+  } catch {
     // not on PATH
   }
   const dir = path.join(CACHE, `wix-${WIX_VERSION}`);

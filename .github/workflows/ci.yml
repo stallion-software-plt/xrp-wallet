@@ -1,4 +1,4 @@
-# Type checks, unit tests and a production build for every push and pull request.
+# Lint, type checks, unit tests and a production build for every push and pull request.
 name: CI
 
 on:
@@ -21,6 +21,7 @@ jobs:
           node-version: 24
           cache: npm
       - run: npm ci --ignore-scripts
+      - run: npm run lint
       - run: npm run typecheck
       - run: npm test
       - run: npm run build

@@ -91,7 +91,7 @@ function signed(amount: Value, sign: SignedAmount['sign']): SignedAmount {
 }
 
 function categoryOf(type: string): Category {
-  if (/^NFToken/.test(type)) return 'nfts';
+  if (type.startsWith('NFToken')) return 'nfts';
   if (/^(Offer|AMM)/.test(type)) return 'trading';
   if (/^(TrustSet|Clawback)$/.test(type)) return 'tokens';
   if (/^(Payment|Escrow|Check|AccountDelete)/.test(type)) return 'payments';
