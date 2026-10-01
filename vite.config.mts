@@ -1,4 +1,5 @@
 import {readFileSync} from 'node:fs';
+import {fileURLToPath} from 'node:url';
 import {defineConfig, type Plugin} from 'vite';
 import react from '@vitejs/plugin-react';
 
@@ -41,6 +42,9 @@ export default defineConfig({
   // Some CommonJS dependencies reference Node's `global`. Point it at the page's own global,
   // in NW.js too, where `global` would otherwise be Node's context.
   define: {global: 'globalThis', __APP_VERSION__: JSON.stringify(pkg.version), __XRPL_VERSION__: JSON.stringify(xrplPkg.version)},
+  resolve: {
+    alias: [{find: /^assert$/, replacement: fileURLToPath(new URL('./src/shims/assert.cjs', import.meta.url))}]
+  },
   build: {
     outDir: 'app',
     emptyOutDir: true,
