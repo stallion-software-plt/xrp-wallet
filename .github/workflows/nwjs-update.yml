@@ -1,0 +1,23 @@
+# Weekly check for a newer NW.js (and so Chromium) release. The run fails when one is available,
+# and GitHub notifies the maintainers of the failed scheduled run.
+name: NW.js update check
+
+on:
+  schedule:
+    - cron: '0 6 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 24
+      - run: node scripts/check-nw-version.mjs

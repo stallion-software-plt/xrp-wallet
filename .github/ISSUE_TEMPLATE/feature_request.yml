@@ -1,0 +1,20 @@
+name: Feature request
+description: Suggest an improvement or a new XRP Ledger feature.
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What would you like to do?
+      description: Describe the problem or the use case, not only the solution.
+    validations:
+      required: true
+  - type: textarea
+    id: idea
+    attributes:
+      label: How could the app help?
+  - type: textarea
+    id: links
+    attributes:
+      label: Related XRPL documentation or amendments
+      description: Optional, e.g. a page on xrpl.org.

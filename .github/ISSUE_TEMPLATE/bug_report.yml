@@ -1,0 +1,66 @@
+name: Bug report
+description: Something in the app doesn't work as it should.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **Never paste your secret key, recovery phrase, wallet file or password here, or show them in screenshots.**
+        Nobody from this project will ever ask for them. Your public address (starting with `r`) and transaction hashes are fine to share.
+
+        Found a security problem? Please report it privately instead (Security tab → Report a vulnerability).
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: What did you do, what did you expect, and what happened instead?
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Open …
+        2. Click …
+        3. See …
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: App version
+      description: Shown in the footer and in Settings → About.
+      placeholder: "1.0.0"
+    validations:
+      required: true
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options:
+        - Windows
+        - macOS (Apple Silicon)
+        - macOS (Intel)
+        - Linux (.deb)
+        - Linux (AppImage)
+        - Linux (.tar.gz)
+        - Other
+    validations:
+      required: true
+  - type: dropdown
+    id: network
+    attributes:
+      label: Network
+      options:
+        - Mainnet
+        - Testnet
+        - Devnet
+        - Other / custom servers
+    validations:
+      required: true
+  - type: textarea
+    id: extra
+    attributes:
+      label: Transaction hash, error message or screenshots
+      description: Optional. Check screenshots don't show a secret key, recovery phrase or password.
