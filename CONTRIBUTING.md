@@ -30,15 +30,65 @@ Node.js features aren't available. Use `npm start` to check anything that touche
 
 The [README](README.md#source-layout) describes where things live.
 
+## Branches, commits and pull requests
+
+`main` is protected: every change reaches it through a pull request, and CI must pass first.
+
+1. **Fork** the repository. Maintainers with write access can push a branch to it directly instead.
+2. **Create a branch from `main`** named after the change, for example `fix/send-tag-reset` or
+   `feat/nft-transfer`.
+3. **Commit** using [Conventional Commits](#commit-messages). Before opening the pull request, bring
+   your branch up to date with `main` (`git fetch upstream` then `git rebase upstream/main` in a fork).
+4. **Open a pull request** against `main` and fill in the template. Give it a Conventional Commits
+   title too; it becomes the commit message when the pull request is squash-merged.
+5. **Review.** A maintainer reviews every pull request. Changes to `.github/workflows/`, `scripts/`,
+   `package.json` or `package-lock.json` get extra scrutiny, because they decide how the installers
+   are built.
+
+### Commit messages
+
+Commit messages and pull request titles follow
+[Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/):
+
+```text
+<type>(<optional scope>): <what the change does, in the imperative>
+```
+
+| Type | Use it for |
+|---|---|
+| `feat` | A new feature for users |
+| `fix` | A bug fix |
+| `docs` | Documentation only |
+| `refactor` | A code change that doesn't change behaviour |
+| `test` | Adding or fixing tests |
+| `build` | Dependencies, NW.js or packaging |
+| `ci` | GitHub Actions workflows |
+| `chore` | Anything else, such as tooling or release housekeeping |
+
+Add a scope when it helps, such as `send`, `trade`, `nft`, `wallet-file`, `i18n` or `release`. If
+users have to adapt to a change (a removed setting, a different default), put `!` after the type and
+explain it in the body. Changes that stop existing recovery phrases or wallet files from working
+aren't accepted (see [Security-sensitive code](#security-sensitive-code)).
+
+```text
+fix(send): clear the destination tag when the recipient changes
+feat(nft): show the issuer of the token in buy offers
+docs: add a Testnet guide to the README
+build(deps): update NW.js to v0.118.0
+```
+
 ## Before you open a pull request
 
 ```bash
+npm run lint
 npm run typecheck
 npm test
 npm run build
 ```
 
-CI runs the same checks on every push and pull request.
+CI runs the same checks on every push and pull request. The lint rules are in `.oxlintrc.json`. If a
+rule is wrong for one particular line, turn it off just there with
+`// oxlint-disable-next-line <rule>` and add a comment explaining why.
 
 - Keep changes focused: one fix or feature per pull request.
 - Match the style of the code around your change (TypeScript strict mode, function components and

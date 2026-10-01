@@ -20,10 +20,10 @@ checked against a pinned SHA-256 checksum, so the version and the checksums chan
    that would pin whatever was downloaded.
 4. Check that the Chromium flags in `package.json` (`chromium-args`) are still valid for the new
    Chromium version.
-5. Run `npm run typecheck`, `npm test` and `npm run build`.
+5. Run `npm run lint`, `npm run typecheck`, `npm test` and `npm run build`.
 6. Ask the maintainer to run `npm start`, which downloads the SDK build and verifies its checksum, and
    to try opening a wallet, sending on the Testnet and opening an external link. Then one
    `npm run dist:<os>` to check the installer build. Don't start these slow runs without asking.
-7. Commit as "Update NW.js to v<version>".
+7. Commit as "build(deps): update NW.js to v<version>".
 
 The `PRIVACY.md` and `SECURITY.md` texts don't name the NW.js version, so they don't need changes.

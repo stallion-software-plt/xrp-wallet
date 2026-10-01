@@ -15,6 +15,7 @@ It holds the keys to people's funds: correctness, security and privacy come befo
 
 ```bash
 npm install
+npm run lint        # oxlint (rules in .oxlintrc.json)
 npm run typecheck   # tsc --noEmit
 npm test            # vitest unit tests
 npm run build       # vite build into app/
@@ -24,7 +25,9 @@ npm run check:nw    # reports a newer NW.js release
 npm run dist:win    # installers into dist/ (also dist:linux, dist:mac): slow, only when asked
 ```
 
-Run `typecheck`, `test` and `build` before calling a change done.
+Run `lint`, `typecheck`, `test` and `build` before calling a change done. ESLint can't be used:
+typescript-eslint doesn't support TypeScript 7 yet. Don't silence a lint rule without a comment
+saying why.
 
 ## Layout
 
@@ -78,6 +81,9 @@ Never:
 - Disable transaction buttons for watch-only wallets (`readOnly` from `useAccount()`).
 - Add or update unit tests for logic in `src/core/` and `src/xrpl/`.
 - Keep comments short and about why, as in the existing code.
+- `main` is protected: work on a branch and open a pull request; CI must pass before it merges.
+- Commit messages and pull request titles follow Conventional Commits (`fix(send): …`,
+  `feat(nft): …`, `docs: …`); see CONTRIBUTING.md for the types and scopes.
 
 ## Skills
 
