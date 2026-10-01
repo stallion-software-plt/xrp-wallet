@@ -1,0 +1,8 @@
+# Store text files with LF line endings for every contributor, whatever their system.
+* text=auto eol=lf
+
+*.png binary
+*.jpg binary
+*.webp binary
+*.ico binary
+*.icns binary

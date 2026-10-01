@@ -1,0 +1,24 @@
+# Dependencies (restore with `npm install`)
+node_modules/
+
+# Packaging output and work folders (`npm run dist`)
+dist/
+build/
+*.nw
+
+# Wallet files created by the app contain encrypted secrets; never commit them.
+# The app suggests names like ripple20260930_141149.txt.
+ripple[0-9]*.txt
+
+# Logs and local environment
+npm-debug.log*
+*.log
+.env
+.env.*
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Vite build output (packaged by scripts/package.mjs)
+/app/
