@@ -107,7 +107,7 @@ export function Send() {
   const [finding, setFinding] = useState(false);
   const [found, setFound] = useState(false);
   const [lastUpdate, setLastUpdate] = useState<number | null>(null);
-  const [now, setNow] = useState(Date.now());
+  const [now, setNow] = useState(() => Date.now());
   const [sendError, setSendError] = useState('');
   const [chosen, setChosen] = useState<PathOption | null>(null);
 
@@ -260,6 +260,7 @@ export function Send() {
     }
     void resolveAccount(id, full, base);
     // Only a new recipient should trigger a lookup.
+    // oxlint-disable-next-line react-hooks/exhaustive-deps
   }, [debouncedInput]);
 
   /* ---------------------------------------------------------------- legacy federation quote */
@@ -317,6 +318,8 @@ export function Send() {
         setQuoteState({loading: false, error: (err as Error).message});
       }
     })();
+    // Ask for a new quote only when the amount, the service's fields or the service change.
+    // oxlint-disable-next-line react-hooks/exhaustive-deps
   }, [debouncedService, recipient.quote, serviceFormValid]);
 
   /* ---------------------------------------------------------------- path finding */
@@ -366,6 +369,8 @@ export function Send() {
         setPaths([{origin: {source_amount: {currency: realCode(code), issuer: own, value}, paths_computed: []}, code: realCode(code), issuer: own, value, rate: '1'}]);
       }
     });
+    // Restart path finding only when the payment changes, not on every balance update.
+    // oxlint-disable-next-line react-hooks/exhaustive-deps
   }, [mode, amountValid, debouncedAmount, code, recipient.address, recipient.invalid, recipient.loading, myAddress]);
 
   /* ---------------------------------------------------------------- confirm and send */

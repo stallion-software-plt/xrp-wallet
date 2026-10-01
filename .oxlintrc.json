@@ -1,0 +1,21 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "plugins": ["typescript", "unicorn", "oxc", "react", "vitest"],
+  "categories": {
+    "correctness": "warn"
+  },
+  "rules": {
+    "react/rules-of-hooks": "error",
+    "react/exhaustive-deps": "warn",
+    "react/refs": "off",
+    "react/set-state-in-effect": "off",
+    "react/no-danger": "error",
+    "react/jsx-no-target-blank": "error",
+    "react/jsx-no-script-url": "error",
+    "no-eval": "error",
+    "no-new-func": "error",
+    "no-script-url": "error",
+    "no-debugger": "error"
+  },
+  "ignorePatterns": ["app/**", "dist/**", "build/**"]
+}

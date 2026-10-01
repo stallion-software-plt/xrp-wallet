@@ -3,8 +3,9 @@
 A desktop wallet for the [XRP Ledger](https://xrpl.org) on Windows, macOS and Linux. Your keys stay
 on your computer, in a wallet file encrypted with your password, and the app collects no data.
 
-> **Beta.** XRP Wallet is new open-source software. Try it on the Testnet first (Settings → Network),
-> keep your recovery phrase backed up on paper, and use it at your own risk.
+> **Beta.** XRP Wallet is new open-source software. Try it on the Testnet first (see
+> [Testnet and Mainnet](#testnet-and-mainnet)), keep your recovery phrase backed up on paper, and use
+> it at your own risk.
 
 ![Dashboard](docs/screenshots/dashboard.png)
 
@@ -60,21 +61,96 @@ using this repository's owner and name.
 The installers aren't code-signed yet. Windows SmartScreen shows "unknown publisher" (choose
 **More info → Run anyway**), and on macOS right-click the app and choose **Open** the first time.
 
+## Testnet and Mainnet
+
+**Mainnet** is the real XRP Ledger: its XRP and tokens have real value. The **Testnet** and
+**Devnet** are separate ledgers for testing, with free test XRP from a faucet. They are reset now and
+then, so don't rely on balances or accounts there.
+
+To try the app without real funds:
+
+1. Create or open a wallet. The same wallet and address work on every network, but each network has
+   its own balances.
+2. Go to **Settings → Network**, choose **XRPL Testnet** (or **XRPL Devnet**) and click **Save**. The
+   wallet stays open and reconnects.
+3. While you're not on Mainnet, the top bar shows a yellow badge with the network's name.
+4. On the dashboard, a new account shows "This account is not activated yet". Click
+   **Fund from faucet** to get test XRP.
+
+To go back, choose **XRPL Mainnet** in the same place; the badge disappears. Check it before sending
+real funds.
+
+Under **Settings → Network** you can also replace a network's servers with your own, for example a
+local `rippled` node, or choose **User defined** for another XRPL-compatible network. Remote servers
+must use `wss://`; plain `ws://` is only allowed to a node on your own computer.
+
+## How it works
+
+XRP Wallet is a React app running in [NW.js](https://nwjs.io), a desktop window based on Chromium.
+Everything that involves your keys happens on your computer:
+
+```mermaid
+flowchart LR
+  subgraph pc [Your computer]
+    ui[Screens] --> tx["Transactions<br>(submit, signGuard)"]
+    tx -->|sign| keys["Open wallet<br>(memory only)"]
+    keys <-->|password| file[("Wallet file<br>encrypted")]
+  end
+  tx <-->|"wss: signed transactions and queries"| xrpl[XRPL servers]
+  ui -->|"https: only when you ask"| web[Issuer domains, federation, NFT media, faucet]
+```
+
+1. **Wallet file.** Your secret key, recovery phrase and contacts are stored in a file you choose,
+   encrypted with your password (AES-256-CCM, PBKDF2-HMAC-SHA256 with 600,000 iterations).
+2. **Open wallet.** The decrypted data is kept in memory only, never in browser storage or other
+   files, until you log out, close the app or it locks itself after a period without activity.
+3. **Signing.** Every transaction goes through one function, `submit()` in `src/xrpl/api.ts`. The
+   server fills in the fee, sequence number and expiry; the app checks that nothing else changed and
+   that the fee is within its limit (0.2 XRP, or the owner reserve for account deletion and AMM
+   creation), then signs on your computer. Only the signed transaction is sent.
+4. **Network.** The app talks to XRPL servers over encrypted websockets. It makes other requests
+   only when you ask for them; [PRIVACY.md](PRIVACY.md) lists every connection.
+
+### Security boundaries
+
+- **Trusted: your computer and this app's code.** If your computer is compromised (malware, a
+  keylogger, someone using your unlocked session), no wallet can protect you.
+- **Not trusted: XRPL servers.** A server could report wrong fees, paths or balances. The app checks
+  what the server fills in before signing, caps the fee, and asks you to confirm payments before
+  they're signed.
+- **Not trusted: anything from the web.** Issuer domains (`xrp-ledger.toml`), federation and quote
+  services and NFT metadata are shown as text, never run, and any address or amount from them is
+  validated.
+- **Not trusted: incoming transactions.** Tiny payments from strangers and senders whose address
+  imitates a contact or your own (address poisoning) are flagged, and tokens whose code imitates XRP
+  are labelled.
+- The app's page only runs its own scripts (Content Security Policy), and web links open in your
+  browser, not in the app.
+
+See [SECURITY.md](SECURITY.md) for details and for how to report a problem.
+
 ## Build from source
 
 The app is written in TypeScript with React, built with Vite and runs in [NW.js](https://nwjs.io).
 It talks to the XRP Ledger through [xrpl.js](https://github.com/XRPLF/xrpl.js). You need Node.js
 22.12 or later ([Node version manager](https://github.com/creationix/nvm) is recommended).
 
-- `npm install` installs the dependencies.
-- `npm start` builds the app and runs it in the NW.js developer build, with DevTools.
-- `npm run dev` runs the app in your web browser with hot reload, for working on the UI. Wallet
-  files are uploaded and downloaded there instead of opened and saved on disk.
-- `npm test` runs the unit tests. They include key-derivation and wallet-file vectors recorded
-  from earlier versions, so existing recovery phrases and wallet files keep working.
-- `npm run typecheck` checks the TypeScript types.
-- `npm run dist` builds the installers for the system you're on. Files go to `dist/`, with a
-  `SHA256SUMS.txt`:
+| Command | What it does |
+|---|---|
+| `npm install` | Installs the dependencies |
+| `npm start` | Builds the app and runs it in the NW.js developer build, with DevTools |
+| `npm run dev` | Runs the app in your web browser with hot reload, for working on the UI. Wallet files are uploaded and downloaded there instead of opened and saved on disk |
+| `npm run build` | Builds the app into `app/` |
+| `npm test` | Runs the unit tests. They include key-derivation and wallet-file vectors recorded from earlier versions, so existing recovery phrases and wallet files keep working |
+| `npm run typecheck` | Checks the TypeScript types |
+| `npm run lint` | Checks the code with [oxlint](https://oxc.rs/docs/guide/usage/linter), including React hook rules and security rules (no `eval`, no `dangerouslySetInnerHTML`) |
+| `npm run check:nw` | Reports whether a newer NW.js release is out |
+| `npm run dist` | Builds the installers for the system you're on (see below) |
+
+There are no environment variables or configuration files to set up. The network, servers,
+appearance and auto-lock time are chosen in the app (Settings) and stored on your computer.
+
+`npm run dist` writes the installers to `dist/`, with a `SHA256SUMS.txt`:
 
 | Command | Run on | Produces |
 |---|---|---|
@@ -144,13 +220,26 @@ XRP Wallet 是一个适用于 Windows、macOS 和 Linux 的 [XRP Ledger](https:/
 
 在 [Releases](../../releases) 页面下载对应系统的安装包，并用同一版本中的 `SHA256SUMS.txt` 校验文件。安装包暂未进行代码签名：Windows 会提示“未知发布者”（选择“更多信息 → 仍要运行”），macOS 首次打开时请右键点击应用并选择“打开”。
 
+## 测试网和主网
+
+**主网**是真正的 XRP Ledger，其中的 XRP 和代币具有真实价值。**测试网**和**开发网**是用于测试的独立账本，可以从水龙头免费领取测试 XRP；它们会不定期重置，不要依赖其中的余额或账户。
+
+不用真实资金试用本钱包：
+
+1. 创建或打开钱包。同一个钱包和地址可以在所有网络上使用，但每个网络的余额是分开的。
+2. 进入“设置 → 网络”，选择“XRPL 测试网”（或“XRPL 开发网”），点击“保存”。钱包保持打开并重新连接。
+3. 不在主网时，顶部栏会显示带有网络名称的黄色标记。
+4. 新账户在首页会显示“此账户尚未激活”，点击“从水龙头获取资金”即可领取测试 XRP。
+
+要切换回来，在同一位置选择“XRPL 主网”，标记随即消失。发送真实资金前请先确认。
+
 ## 开发和运行
 
 本钱包使用 TypeScript 和 React 编写，由 Vite 构建，运行在 NW.js 中，通过 xrpl.js 与 XRP Ledger 交互。需要 Node.js 22.12 或更高版本（推荐使用 [Node version manager](https://github.com/creationix/nvm)）。
 
 - 安装各种依赖包 `npm install`。
 - 开发运行 `npm start`（构建后在 NW.js 开发版中运行，带 DevTools）；`npm run dev` 在浏览器中运行并热更新，便于调整界面。
-- 运行单元测试 `npm test`，类型检查 `npm run typecheck`。
+- 运行单元测试 `npm test`，类型检查 `npm run typecheck`，代码检查 `npm run lint`。
 - 打包安装程序 `npm run dist`，生成当前系统的安装包（输出到 `dist/`）。也可单独运行 `npm run dist:win`（Windows 上生成 `.msi` 和 `.zip`）、`npm run dist:linux`（Linux 上生成 `.deb`、`.AppImage` 和 `.tar.gz`）或 `npm run dist:mac`（macOS 上生成 `.dmg` 和 `.zip`）。每个平台需要在对应的系统上打包；推送版本标签（如 `v1.0.0`）时，GitHub Actions 会自动构建全部平台。
 
 ## 参与贡献

@@ -70,6 +70,7 @@ Add every new `t('key')` to `src/i18n/en.json`, `cn.json` and `jp.json`.
 ## 6. Check
 
 ```bash
+npm run lint
 npm run typecheck
 npm test
 npm run build
