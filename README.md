@@ -47,7 +47,7 @@ Get the installer for your system from the [Releases](../../releases) page:
 | System | File |
 |---|---|
 | Windows | `XRP-Wallet-<version>-win-x64.msi` (or the portable `.zip`) |
-| macOS | `XRP-Wallet-<version>-mac-arm64.dmg` (Apple Silicon) or `-mac-x64.dmg` (Intel) |
+| macOS 13 or later | `XRP-Wallet-<version>-mac-arm64.dmg` (Apple Silicon) or `-mac-x64.dmg` (Intel) |
 | Linux | `xrp-wallet_<version>_amd64.deb`, `XRP-Wallet-<version>-x86_64.AppImage` or the `.tar.gz` |
 
 Check the download against `SHA256SUMS.txt` from the same release, for example
@@ -58,8 +58,23 @@ release workflow from the tagged source and not changed afterwards. With the
 [GitHub CLI](https://cli.github.com), run `gh attestation verify <file> --repo <owner>/<repo>`,
 using this repository's owner and name.
 
-The installers aren't code-signed yet. Windows SmartScreen shows "unknown publisher" (choose
-**More info → Run anyway**), and on macOS right-click the app and choose **Open** the first time.
+The installers aren't code-signed yet. Windows SmartScreen shows "unknown publisher": choose
+**More info → Run anyway**.
+
+On macOS, the first start is blocked with "Apple could not verify…" (or "…is damaged and can't be
+opened"), because the app isn't notarized by Apple:
+
+1. Open the `.dmg` and drag **XRP Wallet** into **Applications**.
+2. Open it once and click **Done** on the warning.
+3. Go to **System Settings → Privacy & Security**, scroll down to **Security** and click
+   **Open Anyway** next to "XRP Wallet was blocked", then confirm with your password or Touch ID.
+   On macOS 14 and earlier, right-clicking the app and choosing **Open** also works.
+
+If there is no **Open Anyway** button, remove the download flag in Terminal, then open the app:
+
+```bash
+xattr -dr com.apple.quarantine "/Applications/XRP Wallet.app"
+```
 
 ## Testnet and Mainnet
 
@@ -218,7 +233,9 @@ XRP Wallet 是一个适用于 Windows、macOS 和 Linux 的 [XRP Ledger](https:/
 
 ## 下载
 
-在 [Releases](../../releases) 页面下载对应系统的安装包，并用同一版本中的 `SHA256SUMS.txt` 校验文件。安装包暂未进行代码签名：Windows 会提示“未知发布者”（选择“更多信息 → 仍要运行”），macOS 首次打开时请右键点击应用并选择“打开”。
+在 [Releases](../../releases) 页面下载对应系统的安装包，并用同一版本中的 `SHA256SUMS.txt` 校验文件。安装包暂未进行代码签名：Windows 会提示“未知发布者”（选择“更多信息 → 仍要运行”）。
+
+macOS 首次打开时会被拦截（提示“Apple 无法验证…”或“已损坏，无法打开”），因为应用未经 Apple 公证：把 **XRP Wallet** 拖入“应用程序”，打开一次并在提示中点击“完成”，然后进入“系统设置 → 隐私与安全性”，在“安全性”下点击“仍要打开”。如果没有这个按钮，请在终端运行 `xattr -dr com.apple.quarantine "/Applications/XRP Wallet.app"` 后再打开。
 
 ## 测试网和主网
 

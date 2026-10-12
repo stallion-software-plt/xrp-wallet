@@ -444,15 +444,43 @@ async function packageLinux(appSrc) {
 
 /* ---------------------------------------------------------------- macOS */
 
+// NW.js starts its helper apps by name: "<product name> Helper (Renderer).app" and so on. The
+// builder renames the ones it knows, but NW.js 0.117 added the "Aperitif" helpers, which it leaves
+// as "nwjs Helper (Aperitif …).app". The app then can't start those processes. Rename whatever is
+// left, the same way the builder does.
+function renameLeftoverHelpers(app) {
+  const versions = path.join(app, 'Contents', 'Frameworks', 'nwjs Framework.framework', 'Versions');
+  const version = fs.readdirSync(versions).find(v => v !== 'Current');
+  const helpers = path.join(versions, version, 'Helpers');
+  for (const entry of fs.readdirSync(helpers)) {
+    if (!/^nwjs Helper.*\.app$/.test(entry)) continue;
+    const oldName = entry.slice(0, -'.app'.length);
+    const newName = oldName.replace(/^nwjs/, NAME);
+    const bundle = path.join(helpers, `${newName}.app`);
+    fs.renameSync(path.join(helpers, entry), bundle);
+    fs.renameSync(path.join(bundle, 'Contents', 'MacOS', oldName), path.join(bundle, 'Contents', 'MacOS', newName));
+    const kind = /Renderer/.test(oldName) ? 'helper.renderer' : /GPU/.test(oldName) ? 'helper.gpu' : /Alerts/.test(oldName) ? 'helper.alert' : 'helper';
+    const values = {CFBundleExecutable: newName, CFBundleName: newName, CFBundleDisplayName: newName, CFBundleIdentifier: `${cfg.appId}.${kind}`};
+    for (const [key, value] of Object.entries(values)) {
+      run('plutil', ['-replace', key, '-string', value, path.join(bundle, 'Contents', 'Info.plist')]);
+    }
+  }
+  const left = fs.readdirSync(helpers).filter(entry => entry.startsWith('nwjs '));
+  if (left.length) throw new Error(`Helper apps were not renamed: ${left.join(', ')}`);
+}
+
 async function packageMac(appSrc) {
   const outputs = [];
   for (const arch of ['x64', 'arm64']) {
     const outDir = await buildApp(appSrc, 'osx', arch, NAME);
     const app = path.join(outDir, `${NAME}.app`);
+    renameLeftoverHelpers(app);
     // Renaming the bundle invalidates NW.js's signature; Apple Silicon refuses unsigned code,
     // so re-sign ad hoc. Distributing outside the App Store without warnings needs a
     // Developer ID signature and notarization on top of this.
     run('codesign', ['--force', '--deep', '--sign', '-', app]);
+    // Fail the build, not the user's first start, if the bundle doesn't verify.
+    run('codesign', ['--verify', '--deep', '--verbose=2', app]);
 
     const zip = path.join(DIST, `${FILE_BASE}-mac-${arch}.zip`);
     run('ditto', ['-c', '-k', '--keepParent', app, zip]);
