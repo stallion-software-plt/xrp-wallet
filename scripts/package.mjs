@@ -68,14 +68,14 @@ function fresh(dir) {
 // stops the build, so a tampered mirror or release can't end up in what users install.
 // NW.js: https://dl.nwjs.io/v<version>/SHASUMS256.txt (update these when changing build.nwVersion).
 const NW_SHA256 = {
-  'nwjs-v0.117.0-win-x64.zip': '0d8356b4ac1550a72a58ec86a5aa44581ce08919617f8d593a3282a3cfa7e397',
-  'nwjs-v0.117.0-linux-x64.tar.gz': '2881ed1f3a9031d58d8fa0f0714d0bdac7b45d52bdec095cd72aa4f31e08debf',
-  'nwjs-v0.117.0-osx-x64.zip': '55362f8eb0c3e165c30eef41d1473bbb8cef1876d0ae0c4570200fd84361631d',
-  'nwjs-v0.117.0-osx-arm64.zip': '5632dee65120283cace880bfdc76efdad2e6004b53ad2625b971de0c1a622693',
-  'nwjs-sdk-v0.117.0-win-x64.zip': '3cc12096d6399ae20db68f23b316da677c0b6937d127e44599991ddfab4935be',
-  'nwjs-sdk-v0.117.0-linux-x64.tar.gz': '66443b5a09ebb43a56f311e95fc178c01853506d7b72033605eaa6b1a1704eec',
-  'nwjs-sdk-v0.117.0-osx-x64.zip': 'a558484cba4c97d190cb41c1e06eb379d239b6a9963b121e691ec8defc4e97b0',
-  'nwjs-sdk-v0.117.0-osx-arm64.zip': 'f9d569bf3916c8504f9b61a1d15c0b50edf0df52945d4b8cc6523f8373c2753f'
+  'nwjs-v0.118.0-win-x64.zip': '43a03d39a2402f2f9cd9982b56d8dd513d8e4f289cd34253af7deb8c45e58df2',
+  'nwjs-v0.118.0-linux-x64.tar.gz': 'c6270b40ca9880ba7e48682164c0a9d5dba45951c0b72ea42cab7e5b3128f69d',
+  'nwjs-v0.118.0-osx-x64.zip': '8e090933806ff097e46afccb6f5736293a0a2c7cbcd11b2c88b356616e897d86',
+  'nwjs-v0.118.0-osx-arm64.zip': '0f59d2e7583f798e3efe611fcf4cb21a94a80098ac88f7768cd3eb9e16242625',
+  'nwjs-sdk-v0.118.0-win-x64.zip': '687f78233a56f19185a0ca9b638e114620f3335f4c4b01f2801f3664df27b838',
+  'nwjs-sdk-v0.118.0-linux-x64.tar.gz': '90247ee9ceef6210d0f6ce0df62eb59d8ea93b3e6fb36c589f2856ca4dd28bdb',
+  'nwjs-sdk-v0.118.0-osx-x64.zip': '9a272d671ec08601acd0835366a49a4bc593cfaefc95033178bc5b87281c511f',
+  'nwjs-sdk-v0.118.0-osx-arm64.zip': 'f84944490ae14d50b4c4b1edb42ecbbcd96c1a99c6fdbafcd3c8e45f3814efa2'
 };
 // WiX: the SHA-512 NuGet publishes for wix 5.0.2 matches this file.
 const WIX_SHA256 = 'f30ef0c74e2a986126539c5780be93ac24e8136eaf723b1937b26272703ae173';
@@ -444,15 +444,43 @@ async function packageLinux(appSrc) {
 
 /* ---------------------------------------------------------------- macOS */
 
+// NW.js starts its helper apps by name: "<product name> Helper (Renderer).app" and so on. The
+// builder renames the ones it knows, but NW.js 0.117 added the "Aperitif" helpers, which it leaves
+// as "nwjs Helper (Aperitif …).app". The app then can't start those processes. Rename whatever is
+// left, the same way the builder does.
+function renameLeftoverHelpers(app) {
+  const versions = path.join(app, 'Contents', 'Frameworks', 'nwjs Framework.framework', 'Versions');
+  const version = fs.readdirSync(versions).find(v => v !== 'Current');
+  const helpers = path.join(versions, version, 'Helpers');
+  for (const entry of fs.readdirSync(helpers)) {
+    if (!/^nwjs Helper.*\.app$/.test(entry)) continue;
+    const oldName = entry.slice(0, -'.app'.length);
+    const newName = oldName.replace(/^nwjs/, NAME);
+    const bundle = path.join(helpers, `${newName}.app`);
+    fs.renameSync(path.join(helpers, entry), bundle);
+    fs.renameSync(path.join(bundle, 'Contents', 'MacOS', oldName), path.join(bundle, 'Contents', 'MacOS', newName));
+    const kind = /Renderer/.test(oldName) ? 'helper.renderer' : /GPU/.test(oldName) ? 'helper.gpu' : /Alerts/.test(oldName) ? 'helper.alert' : 'helper';
+    const values = {CFBundleExecutable: newName, CFBundleName: newName, CFBundleDisplayName: newName, CFBundleIdentifier: `${cfg.appId}.${kind}`};
+    for (const [key, value] of Object.entries(values)) {
+      run('plutil', ['-replace', key, '-string', value, path.join(bundle, 'Contents', 'Info.plist')]);
+    }
+  }
+  const left = fs.readdirSync(helpers).filter(entry => entry.startsWith('nwjs '));
+  if (left.length) throw new Error(`Helper apps were not renamed: ${left.join(', ')}`);
+}
+
 async function packageMac(appSrc) {
   const outputs = [];
   for (const arch of ['x64', 'arm64']) {
     const outDir = await buildApp(appSrc, 'osx', arch, NAME);
     const app = path.join(outDir, `${NAME}.app`);
+    renameLeftoverHelpers(app);
     // Renaming the bundle invalidates NW.js's signature; Apple Silicon refuses unsigned code,
     // so re-sign ad hoc. Distributing outside the App Store without warnings needs a
     // Developer ID signature and notarization on top of this.
     run('codesign', ['--force', '--deep', '--sign', '-', app]);
+    // Fail the build, not the user's first start, if the bundle doesn't verify.
+    run('codesign', ['--verify', '--deep', '--verbose=2', app]);
 
     const zip = path.join(DIST, `${FILE_BASE}-mac-${arch}.zip`);
     run('ditto', ['-c', '-k', '--keepParent', app, zip]);
