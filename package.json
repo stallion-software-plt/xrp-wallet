@@ -49,16 +49,16 @@
     "icon": "./assets/ripple.png"
   },
   "devDependencies": {
-    "@nwutils/packager": "^0.4.0",
-    "@types/node": "^26.6.3",
+    "@nwutils/packager": "^0.5.0",
+    "@types/node": "^26.6.4",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
     "@types/sjcl": "^1.0.34",
-    "@vitejs/plugin-react": "^6.1.1",
-    "nw-builder": "^4.20.0",
-    "oxlint": "^1.86.0",
+    "@vitejs/plugin-react": "^6.1.2",
+    "nw-builder": "^4.21.4",
+    "oxlint": "^1.87.0",
     "typescript": "^7.0.2",
-    "vite": "^8.3.1",
+    "vite": "^8.3.2",
     "vitest": "^5.0.3"
   }
 }
