@@ -1,7 +1,7 @@
 {
   "name": "xrp-wallet",
   "productName": "XRP Wallet",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Desktop wallet for the XRP Ledger",
   "main": "main.js",
   "chromium-args": "--disable-gpu --disable-background-networking --disable-component-update --disable-domain-reliability --no-pings --disable-breakpad --disable-features=PreconnectToSearch --component-updater=url-source=http://127.0.0.1:9 --apps-gallery-update-url=http://127.0.0.1:9/ --host-resolver-rules='MAP www.google.com ~NOTFOUND, MAP update.googleapis.com ~NOTFOUND, MAP *.gvt1.com ~NOTFOUND'",
@@ -38,7 +38,7 @@
     "zustand": "^5.0.15"
   },
   "build": {
-    "nwVersion": "0.117.0",
+    "nwVersion": "0.118.0",
     "appId": "com.xrpwallet.desktop",
     "company": "XRP Wallet contributors",
     "maintainer": "XRP Wallet contributors <noreply@xrpwallet.invalid>",
