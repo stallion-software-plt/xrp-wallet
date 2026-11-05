@@ -25,17 +25,17 @@
     "@scure/bip39": "^2.4.0",
     "bignumber.js": "^11.1.5",
     "font-awesome": "^4.7.0",
-    "i18next": "^26.5.3",
+    "i18next": "^26.7.1",
     "qrcode.react": "^4.2.0",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",
-    "react-i18next": "^17.1.0",
-    "react-router": "^8.5.0",
+    "react-i18next": "^17.1.11",
+    "react-router": "^8.5.1",
     "ripple-lib-transactionparser": "^0.8.2",
     "sjcl": "^1.0.9",
     "smol-toml": "^1.9.1",
     "xrpl": "^5.3.0",
-    "zustand": "^5.0.15"
+    "zustand": "^5.0.16"
   },
   "build": {
     "nwVersion": "0.118.0",
@@ -50,15 +50,15 @@
   },
   "devDependencies": {
     "@nwutils/packager": "^0.8.0",
-    "@types/node": "^26.6.5",
+    "@types/node": "^26.6.6",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
     "@types/sjcl": "^1.0.34",
-    "@vitejs/plugin-react": "^6.1.2",
+    "@vitejs/plugin-react": "^6.2.1",
     "nw-builder": "^4.24.0",
-    "oxlint": "^1.89.0",
+    "oxlint": "^1.90.0",
     "typescript": "^7.0.2",
-    "vite": "^8.3.4",
-    "vitest": "^5.0.5"
+    "vite": "^8.3.5",
+    "vitest": "^5.1.0"
   }
 }
