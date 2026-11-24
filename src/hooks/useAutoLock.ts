@@ -11,12 +11,17 @@ const CHECK_EVERY_MS = 5000;
 export function useAutoLock(onLock: (minutes: number) => void): void {
   const address = useAccount(s => s.address);
   const readOnly = useAccount(s => s.readOnly);
+  useIdleTimer(!!address && !readOnly, onLock);
+}
+
+/** Calls `onIdle` after the auto-lock time without input, while `active`. */
+export function useIdleTimer(active: boolean, onIdle: (minutes: number) => void): void {
   const minutes = useApp(s => s.autoLockMinutes);
-  const lockRef = useRef(onLock);
-  lockRef.current = onLock;
+  const lockRef = useRef(onIdle);
+  lockRef.current = onIdle;
 
   useEffect(() => {
-    if (!address || readOnly) return;
+    if (!active) return;
     let last = Date.now();
     const touch = () => {
       last = Date.now();
@@ -29,5 +34,5 @@ export function useAutoLock(onLock: (minutes: number) => void): void {
       clearInterval(timer);
       for (const name of ACTIVITY_EVENTS) window.removeEventListener(name, touch, {capture: true});
     };
-  }, [address, readOnly, minutes]);
+  }, [active, minutes]);
 }

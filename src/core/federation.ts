@@ -4,6 +4,16 @@ import {parse} from 'smol-toml';
 
 const tomlCache: Record<string, Record<string, unknown>> = {};
 
+// A public host name: no IP addresses, `localhost` or ports.
+const HOST = /^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z](?:[a-z0-9-]{0,61}[a-z0-9])$/i;
+
+/** Splits `name@domain`, or returns null if it can't be a federation address. */
+export function parseFederationAddress(value: string): {name: string; domain: string} | null {
+  const parts = value.trim().split('@');
+  if (parts.length !== 2 || !parts[0] || /\s/.test(parts[0]) || !HOST.test(parts[1])) return null;
+  return {name: parts[0], domain: parts[1]};
+}
+
 /** /.well-known/ripple.toml, which names the domain's federation (XRC20) server. */
 export async function getRippleToml(domain: string): Promise<Record<string, unknown>> {
   if (tomlCache[domain]) return tomlCache[domain];

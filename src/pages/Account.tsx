@@ -2,12 +2,15 @@ import {useCallback, useEffect, useState} from 'react';
 import {useSearchParams} from 'react-router';
 import {useTranslation} from 'react-i18next';
 import {PageHeader} from '../components/Common';
+import {Modal} from '../components/Modal';
 import {TxStatus} from '../components/TxStatus';
 import {fmtFixed, hexToText} from '../core/format';
 import {isValidAddress} from '../core/id';
+import {findLookalike} from '../core/lookalike';
 import {useTx} from '../hooks/useTx';
 import {useAccount} from '../state/account';
 import {useApp} from '../state/app';
+import {askConfirm} from '../state/confirm';
 import {
   clawback, createTickets, deleteAccount, deleteDID, depositPreauth, errorMessage, getAccountInfo, getDID, getDepositPreauths,
   getTickets, isNotFound, setDID, setDomain, setFlag, setMessageKey, setNFTokenMinter, setRegularKey, setSignerList,
@@ -40,6 +43,15 @@ interface Signer {
   weight: string;
 }
 
+/** An action that can hand over or end control of the account, with the values to be signed. */
+type ControlAction =
+  | {kind: 'regular'; address: string}
+  | {kind: 'signers'; quorum: string; entries: Signer[]}
+  | {kind: 'delete'; destination: string; tag: string};
+
+const CONFIRM_WORD = 'CONFIRM';
+const CONTROL_WARNING = {regular: 'review_regular_warning', signers: 'review_signers_warning', delete: 'review_delete_warning'} as const;
+
 interface Loaded {
   info: AccountInfo;
   tickets: number[];
@@ -54,6 +66,9 @@ export function Account() {
   const reserveInc = useApp(s => s.reserveInc);
   const address = useAccount(s => s.address);
   const readOnly = useAccount(s => s.readOnly);
+  const contacts = useAccount(s => s.contacts);
+  const [control, setControl] = useState<ControlAction | null>(null);
+  const [controlWord, setControlWord] = useState('');
   const [section, setSection] = useState<Section>(() => (SECTIONS.some(s => s.key === params.get('section')) ? params.get('section') as Section : 'flags'));
   const [loaded, setLoaded] = useState<Loaded | null>(null);
   const [loading, setLoading] = useState(false);
@@ -107,7 +122,7 @@ export function Account() {
   const info = loaded?.info;
 
   const toggleFlag = async (flag: AccountFlag, value: boolean) => {
-    if (value && CONFIRM.includes(flag) && !window.confirm(t(`flag_${flag}_confirm`))) return;
+    if (value && CONFIRM.includes(flag) && !(await askConfirm(t(`flag_${flag}_confirm`)))) return;
     setFlags(f => f && {...f, [flag]: value});
     const hash = await tx.run(`flag_${flag}`, () => setFlag(flag, value));
     if (!hash) setFlags(f => f && {...f, [flag]: !value});
@@ -135,7 +150,29 @@ export function Account() {
   const count = Number(ticketCount);
   const ticketsValid = count >= 1 && count <= 250 && (loaded?.tickets.length || 0) + count <= 250;
 
-  const deleteAcct = () => void tx.run('delete', () => deleteAccount(del.destination.trim(), del.tag));
+  const delTagValid = !del.tag || (/^\d{1,10}$/.test(del.tag) && Number(del.tag) < 2 ** 32);
+
+  const reviewControl = (action: ControlAction) => {
+    setControlWord('');
+    setControl(action);
+  };
+  const closeControl = () => setControl(null);
+  // Signs the values frozen in the review, not whatever the form holds now.
+  const runControl = () => {
+    if (!control || controlWord.trim().toUpperCase() !== CONFIRM_WORD) return;
+    const action = control;
+    setControl(null);
+    if (action.kind === 'regular') void tx.run('regular', () => setRegularKey(action.address));
+    else if (action.kind === 'signers') void tx.run('signers', () => setSignerList(action.quorum, action.entries));
+    else void tx.run('delete', () => deleteAccount(action.destination, action.tag));
+  };
+  const controlAddresses = !control ? [] : control.kind === 'regular' ? [control.address]
+    : control.kind === 'delete' ? [control.destination] : control.entries.map(e => e.account);
+  const known = [{name: '', address: address || ''}, ...contacts.map(c => ({name: c.name, address: c.address}))];
+  const controlLookalikes = controlAddresses.flatMap(a => {
+    const match = findLookalike(a, known);
+    return match ? [match] : [];
+  });
 
   const flagRow = (f: AccountFlag) => (
     <div className="setting-row" key={f}>
@@ -224,7 +261,7 @@ export function Account() {
                   </div>
                   <TxStatus state={tx.status.regular} />
                   <div className="cluster">
-                    <button type="button" className="btn btn-primary" onClick={() => void tx.run('regular', () => setRegularKey(nextRegularKey))}
+                    <button type="button" className="btn btn-primary" onClick={() => reviewControl({kind: 'regular', address: nextRegularKey})}
                       disabled={readOnly || tx.busy('regular') || !isValidAddress(nextRegularKey) || nextRegularKey === address}>
                       <i className="fa fa-key" /> {t('set_regular_key')}
                     </button>
@@ -266,7 +303,7 @@ export function Account() {
                   </div>
                   <TxStatus state={tx.status.signers} />
                   <div className="cluster">
-                    <button type="button" className="btn btn-primary" onClick={() => void tx.run('signers', () => setSignerList(signers.quorum, signers.entries))} disabled={readOnly || tx.busy('signers') || !signersValid}>
+                    <button type="button" className="btn btn-primary" onClick={() => reviewControl({kind: 'signers', quorum: signers.quorum, entries: signers.entries.map(e => ({account: e.account.trim(), weight: e.weight}))})} disabled={readOnly || tx.busy('signers') || !signersValid}>
                       <i className="fa fa-check" /> {t('save_signer_list')}
                     </button>
                     {info.signerList && (
@@ -418,12 +455,16 @@ export function Account() {
                       <input id="delete_destination" className="input mono" value={del.destination} onChange={e => setDel(d => ({...d, destination: e.target.value.trim()}))} placeholder="r..." />
                       {del.destination && !isValidAddress(del.destination) && <div className="form-error">{t('invalid_account')}</div>}
                     </div>
-                    <div className="field"><label htmlFor="delete_tag">{t('dest_tag')}</label><input id="delete_tag" className="input" value={del.tag} onChange={e => setDel(d => ({...d, tag: e.target.value.trim()}))} placeholder={t('optional')} /></div>
+                    <div className={`field ${delTagValid ? '' : 'has-error'}`}>
+                      <label htmlFor="delete_tag">{t('dest_tag')}</label>
+                      <input id="delete_tag" className="input" value={del.tag} onChange={e => setDel(d => ({...d, tag: e.target.value.trim()}))} placeholder={t('optional')} />
+                      {!delTagValid && <div className="form-error">{t('error_invalid_tag')}</div>}
+                    </div>
                   </div>
                   <label className="checkbox-row"><input type="checkbox" checked={del.understood} onChange={e => setDel(d => ({...d, understood: e.target.checked}))} /> {t('delete_understand')}</label>
                   <TxStatus state={tx.status.delete} />
-                  <button type="button" className="btn btn-danger align-self-start" onClick={deleteAcct}
-                    disabled={readOnly || tx.busy('delete') || !del.understood || !isValidAddress(del.destination) || del.destination === address}>
+                  <button type="button" className="btn btn-danger align-self-start" onClick={() => reviewControl({kind: 'delete', destination: del.destination.trim(), tag: del.tag})}
+                    disabled={readOnly || tx.busy('delete') || !del.understood || !delTagValid || !isValidAddress(del.destination) || del.destination === address}>
                     <i className="fa fa-trash-o" /> {t('AccountDelete')}
                   </button>
                 </div>
@@ -432,6 +473,43 @@ export function Account() {
           </div>
         )}
       </div>
+
+      {control && (
+        <Modal
+          title={t('review_action')}
+          onClose={closeControl}
+          footer={
+            <>
+              <button type="button" className="btn btn-ghost" onClick={closeControl}>{t('cancel')}</button>
+              <button type="button" className="btn btn-danger" onClick={runControl} disabled={controlWord.trim().toUpperCase() !== CONFIRM_WORD}><i className="fa fa-check" /> {t('confirm')}</button>
+            </>
+          }
+        >
+          <div className="alert alert-warning"><i className="fa fa-exclamation-triangle" /><span>{t(CONTROL_WARNING[control.kind])}</span></div>
+          <div className="summary-box">
+            {control.kind === 'regular' && <div className="summary-row"><span className="k">{t('new_regular_key')}</span><span className="v mono break">{control.address}</span></div>}
+            {control.kind === 'signers' && (
+              <>
+                <div className="summary-row"><span className="k">{t('quorum')}</span><span className="v">{control.quorum}</span></div>
+                {control.entries.map(e => <div className="summary-row" key={e.account}><span className="k">{t('weight')} {e.weight}</span><span className="v mono break">{e.account}</span></div>)}
+              </>
+            )}
+            {control.kind === 'delete' && (
+              <>
+                <div className="summary-row"><span className="k">{t('dest_account')}</span><span className="v mono break">{control.destination}</span></div>
+                {control.tag && <div className="summary-row"><span className="k">{t('dest_tag')}</span><span className="v">{control.tag}</span></div>}
+              </>
+            )}
+          </div>
+          {controlLookalikes.map(m => (
+            <div className="alert alert-error" key={m.address}><i className="fa fa-exclamation-triangle" /><span>{m.name ? t('send_lookalike', {name: m.name, address: m.address}) : t('send_lookalike_self')}</span></div>
+          ))}
+          <div className="field">
+            <label htmlFor="control_word">{t('review_type_confirm', {word: CONFIRM_WORD})}</label>
+            <input id="control_word" className="input mono" autoComplete="off" spellCheck={false} value={controlWord} onChange={e => setControlWord(e.target.value)} />
+          </div>
+        </Modal>
+      )}
     </>
   );
 }

@@ -3,12 +3,15 @@ import {useNavigate} from 'react-router';
 import {useTranslation} from 'react-i18next';
 import {AuthFrame} from '../components/AuthFrame';
 import {MnemonicGrid} from '../components/MnemonicGrid';
+import {isBackupWord, pickWordPositions} from '../core/backupCheck';
 import {generateAccount, generateFilename, generateMnemonic, isValidMnemonic, isValidSecret, mnemonicInEnglish, mnemonicInLang} from '../core/id';
-import {MIN_PASSWORD_LENGTH, passwordStrength} from '../core/password';
+import {isGuessable, MIN_PASSWORD_LENGTH, passwordStrength} from '../core/password';
 import * as session from '../core/session';
 import type {WalletData} from '../core/walletFile';
+import {useIdleTimer} from '../hooks/useAutoLock';
 import {chooseFileToSave} from '../platform/files';
 import {useApp} from '../state/app';
+import {answerConfirm, askConfirm} from '../state/confirm';
 
 type Mode = 'choose' | 'password' | 'secret' | 'mnemonic' | 'backup';
 
@@ -32,6 +35,12 @@ export function Register() {
   const [created, setCreated] = useState<WalletData | null>(null);
   const [showPassword, setShowPassword] = useState(false);
   const [showSecret, setShowSecret] = useState(false);
+  const [fileTaken, setFileTaken] = useState(false);
+  const [revealed, setRevealed] = useState(false);
+  const [verifying, setVerifying] = useState(false);
+  const [quiz, setQuiz] = useState<number[]>([]);
+  const [answers, setAnswers] = useState<Record<number, string>>({});
+  const [haveCopy, setHaveCopy] = useState(false);
 
   const strength = passwordStrength(password1);
   const mismatch = password2Touched && password1 !== password2;
@@ -56,6 +65,7 @@ export function Register() {
     if (!file) return false;
     setPath(file.path);
     setSaveError('');
+    setFileTaken(false);
     setMode('password');
     return true;
   };
@@ -95,23 +105,47 @@ export function Register() {
       setMode('backup');
     } catch (err) {
       console.error('Wallet creation failed', err);
+      setFileTaken((err as Error).message === 'wallet_file_exists');
       setSaveError(t((err as Error).message));
     } finally {
       setBusy(false);
     }
   };
 
-  const reveal = (show: (v: boolean) => void) => {
-    if (window.confirm(t('are_you_sure_secret'))) show(true);
+  const reveal = async (show: (v: boolean) => void) => {
+    if (await askConfirm(t('are_you_sure_secret'))) show(true);
+  };
+
+  // The password and keys are in this screen's state until the wallet opens, so it locks too.
+  useIdleTimer(mode !== 'choose', minutes => {
+    answerConfirm(false);
+    useApp.setState({lockedAfter: minutes});
+    navigate('/login', {replace: true});
+  });
+
+  const translatedPhrase = created?.mnemonic && (lang === 'cn' || lang === 'jp') ? mnemonicInLang(created.mnemonic, lang) : '';
+  const phrases = created?.mnemonic ? [created.mnemonic, ...(translatedPhrase ? [translatedPhrase] : [])] : [];
+  // A phrase must have been shown before it can be checked. An imported key is already in the user's hands.
+  const canContinue = revealed || !created?.mnemonic;
+  const backupConfirmed = created?.mnemonic
+    ? quiz.length > 0 && quiz.every(p => isBackupWord(phrases, p, answers[p] ?? ''))
+    : haveCopy;
+
+  const startVerify = () => {
+    if (!created || !canContinue) return;
+    setShowSecret(false);
+    setShowPassword(false);
+    setAnswers({});
+    setHaveCopy(false);
+    setQuiz(created.mnemonic ? pickWordPositions(created.mnemonic.trim().split(/\s+/).length) : []);
+    setVerifying(true);
   };
 
   const finish = () => {
-    if (!created) return;
+    if (!created || !backupConfirmed) return;
     session.openCreated(created, password1, path);
     navigate('/balance');
   };
-
-  const translatedPhrase = created?.mnemonic && (lang === 'cn' || lang === 'jp') ? mnemonicInLang(created.mnemonic, lang) : '';
 
   return (
     <AuthFrame>
@@ -156,7 +190,7 @@ export function Register() {
                 </div>
                 <input className="input" id="password1" type="password" autoComplete="off" value={password1} onChange={e => setPassword1(e.target.value)} required />
                 <div className={`strength-bar ${strength}`}><span /></div>
-                {strength === 'weak' && <div className="form-error">{t(password1.length < MIN_PASSWORD_LENGTH ? 'pwd_too_short' : 'pwd_weak')}</div>}
+                {strength === 'weak' && <div className="form-error">{password1.length < MIN_PASSWORD_LENGTH ? t('pwd_too_short') : isGuessable(password1) ? t('pwd_common') : t('pwd_weak')}</div>}
               </div>
               <div className={`field ${mismatch ? 'has-error' : ''}`}>
                 <label htmlFor="password2">{t('password_confirm')}</label>
@@ -165,6 +199,7 @@ export function Register() {
                 {mismatch && <div className="form-error">{t('pwd_not_match')}</div>}
               </div>
               {saveError && <div className="alert alert-error"><i className="fa fa-exclamation-circle" /><span>{saveError}</span></div>}
+              {fileTaken && <button type="button" className="btn btn-secondary btn-block" onClick={() => void chooseFile()}><i className="fa fa-file-text-o" /> {t('choose_other_file')}</button>}
               <button className="btn btn-primary btn-lg btn-block" type="submit" disabled={busy || !password1 || strength === 'weak' || password1 !== password2}>
                 <i className={`fa ${busy ? 'fa-spinner fa-pulse' : 'fa-lock'}`} /> {t('encrypt_account')}
               </button>
@@ -212,7 +247,36 @@ export function Register() {
         </div>
       )}
 
-      {mode === 'backup' && created && (
+      {mode === 'backup' && created && verifying && (
+        <div className="card auth-card wide">
+          <div className="card-body stack">
+            <div>
+              <h2 className="auth-title">{t('backup_verify_title')}</h2>
+              {created.mnemonic && <p className="auth-sub mb-0">{t('backup_verify_desc')}</p>}
+            </div>
+            {created.mnemonic ? quiz.map(p => {
+              const answer = answers[p] ?? '';
+              const wrong = !!answer.trim() && !isBackupWord(phrases, p, answer);
+              return (
+                <div className={`field ${wrong ? 'has-error' : ''}`} key={p}>
+                  <label htmlFor={`backup_word_${p}`}>{t('backup_word_n', {n: p + 1})}</label>
+                  <input className="input mono" id={`backup_word_${p}`} type="text" autoComplete="off" spellCheck={false} value={answer}
+                    onChange={e => setAnswers(a => ({...a, [p]: e.target.value}))} />
+                  {wrong && <div className="form-error">{t('backup_word_wrong')}</div>}
+                </div>
+              );
+            }) : (
+              <label className="checkbox-row"><input type="checkbox" checked={haveCopy} onChange={e => setHaveCopy(e.target.checked)} /> {t('backup_have_secret')}</label>
+            )}
+            <div className="grid-2">
+              <button type="button" className="btn btn-secondary btn-lg" onClick={() => setVerifying(false)}><i className="fa fa-arrow-left" /> {t('back')}</button>
+              <button type="button" className="btn btn-primary btn-lg" onClick={finish} disabled={!backupConfirmed}><i className="fa fa-check" /> {t('yes_save')}</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {mode === 'backup' && created && !verifying && (
         <div className="card auth-card wide">
           <div className="card-body stack">
             <div>
@@ -230,7 +294,7 @@ export function Register() {
                 <div className="secret-label">{t('password')}</div>
                 {showPassword
                   ? <button type="button" className="btn btn-ghost btn-xs" onClick={() => setShowPassword(false)}><i className="fa fa-eye-slash" /> {t('hide')}</button>
-                  : <button type="button" className="btn btn-ghost btn-xs" onClick={() => reveal(setShowPassword)}><i className="fa fa-eye" /> {t('show')}</button>}
+                  : <button type="button" className="btn btn-ghost btn-xs" onClick={() => void reveal(setShowPassword)}><i className="fa fa-eye" /> {t('show')}</button>}
               </div>
               <div className="mono break">{showPassword ? password1 : '*'.repeat(password1.length)}</div>
             </div>
@@ -239,7 +303,7 @@ export function Register() {
                 <div className="secret-label">{t('secret_key')}</div>
                 {showSecret
                   ? <button type="button" className="btn btn-ghost btn-xs" onClick={() => setShowSecret(false)}><i className="fa fa-eye-slash" /> {t('hide')}</button>
-                  : <button type="button" className="btn btn-ghost btn-xs" onClick={() => reveal(setShowSecret)}><i className="fa fa-eye" /> {t('show')}</button>}
+                  : <button type="button" className="btn btn-ghost btn-xs" onClick={() => void reveal(v => { setShowSecret(v); setRevealed(true); })}><i className="fa fa-eye" /> {t('show')}</button>}
               </div>
               <div className="mono break">{showSecret ? created.secret : '*'.repeat(55)}</div>
               {showSecret && created.mnemonic && (
@@ -255,7 +319,8 @@ export function Register() {
                 </div>
               )}
             </div>
-            <button type="button" className="btn btn-primary btn-lg btn-block" onClick={finish}><i className="fa fa-check" /> {t('yes_save')}</button>
+            {!canContinue && <div className="hint">{t('backup_reveal_first')}</div>}
+            <button type="button" className="btn btn-primary btn-lg btn-block" onClick={startVerify} disabled={!canContinue}><i className="fa fa-check" /> {t('backup_written')}</button>
           </div>
         </div>
       )}

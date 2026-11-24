@@ -4,9 +4,9 @@ import {useTranslation} from 'react-i18next';
 import BigNumber from 'bignumber.js';
 import {isValidXAddress, xAddressToClassicAddress, xrpToDrops, type Amount} from 'xrpl';
 import {fmtCode, fmtFixed, isDecimal, realCode, round} from '../core/format';
-import {getRippleToml} from '../core/federation';
+import {getRippleToml, parseFederationAddress} from '../core/federation';
 import {getGateway} from '../core/gateways';
-import {isValidAddress} from '../core/id';
+import {isValidAddress, xAddressFitsNetwork} from '../core/id';
 import {findLookalike} from '../core/lookalike';
 import {getLang} from '../core/settings';
 import {useDebounced} from '../hooks/useDebounced';
@@ -37,6 +37,8 @@ interface Recipient {
   address: string;
   loading: boolean;
   invalid: boolean;
+  /** An X-address made for another network. */
+  wrongNetwork?: boolean;
   federation: boolean;
   notFunded: boolean;
   tagRequired: boolean;
@@ -70,9 +72,24 @@ function emptyRecipient(nativeCode: string): Recipient {
   };
 }
 
+/** The exact payment the user reviews and signs, fixed when the review screen opens. */
+interface Review {
+  label: string;
+  address: string;
+  code: string;
+  isNative: boolean;
+  amount: string;
+  tag: string;
+  msg: string;
+  memos: Memo[];
+  invoice: string;
+  option: PathOption;
+}
+
+// Digits only: `0x10` or `1e3` would be shown as typed but signed as another number.
 function validTag(tag: string): boolean {
   const n = Number(tag);
-  return Number.isInteger(n) && n > 0 && n < 2 ** 32;
+  return /^\d{1,10}$/.test(tag) && n > 0 && n < 2 ** 32;
 }
 
 export function Send() {
@@ -109,11 +126,15 @@ export function Send() {
   const [lastUpdate, setLastUpdate] = useState<number | null>(null);
   const [now, setNow] = useState(() => Date.now());
   const [sendError, setSendError] = useState('');
-  const [chosen, setChosen] = useState<PathOption | null>(null);
+  const [review, setReview] = useState<Review | null>(null);
+  // The name@domain the user asked to look up: contacting a domain shares the wallet address with it.
+  const [lookup, setLookup] = useState('');
 
   const debouncedInput = useDebounced(input.trim());
   const debouncedAmount = useDebounced(amount.trim());
+  // Bumped to drop the replies of lookups that are no longer wanted.
   const resolveId = useRef(0);
+  const quoteId = useRef(0);
 
   const isNativeCode = code === native.code;
   const amountValid = useMemo(() => {
@@ -180,6 +201,7 @@ export function Send() {
     setRecipient({...base, federation: true, loading: true});
     try {
       const toml = await getRippleToml(domain);
+      if (id !== resolveId.current) return;
       const api = toml.XRC20_SERVER as string | undefined;
       if (!api) throw new Error('NoFederationUrl');
       const query = new URLSearchParams({
@@ -190,12 +212,14 @@ export function Send() {
       if (id !== resolveId.current) return;
       if (!response.ok) throw new Error(response.statusText);
       const res = await response.json();
+      if (id !== resolveId.current) return;
       if (res.error || res.result === 'error') throw new Error(res.error_message || res.error);
 
       if (res.xrc20_json) {
         const data = res.xrc20_json;
         if (data.domain !== domain) throw new Error(`The domain field in response must be ${domain}`);
         if (data.type !== 'address') throw new Error(`The type ${data.type} is not supported yet.`);
+        if (!isValidAddress(data.destination_address)) throw new Error('invalid_address');
         const currencies = (data.currencies as Array<{currency: string; value?: string; min?: number; max?: number}>).map(c => realCode(c.currency));
         setRecipient({
           ...base, federation: true, loading: false, address: data.destination_address, extraFields: data.extra_fields || null,
@@ -227,6 +251,7 @@ export function Send() {
 
   useEffect(() => {
     const id = ++resolveId.current;
+    quoteId.current++;
     stopPath(true);
     setSendError('');
     setQuoteState({loading: false, error: ''});
@@ -249,19 +274,25 @@ export function Send() {
       return;
     }
     if (full.includes('@')) {
-      void resolveFederation(id, full, base);
+      if (!parseFederationAddress(full)) setRecipient({...base, invalid: true});
+      else if (lookup === full) void resolveFederation(id, full, base);
+      else setRecipient({...base, federation: true});
       return;
     }
     if (isValidXAddress(full)) {
       const decoded = xAddressToClassicAddress(full);
+      if (!xAddressFitsNetwork(decoded.test, network.networkType)) {
+        setRecipient({...base, invalid: true, wrongNetwork: true});
+        return;
+      }
       if (decoded.tag !== false) setTag(String(decoded.tag));
       void resolveAccount(id, decoded.classicAddress, {...base, tagProvided: true});
       return;
     }
     void resolveAccount(id, full, base);
-    // Only a new recipient should trigger a lookup.
+    // Only a new recipient or an explicit lookup should trigger a lookup.
     // oxlint-disable-next-line react-hooks/exhaustive-deps
-  }, [debouncedInput]);
+  }, [debouncedInput, lookup]);
 
   /* ---------------------------------------------------------------- legacy federation quote */
 
@@ -274,8 +305,8 @@ export function Send() {
     });
     setFieldValues(initial);
   }, [recipient.extraFields]);
-  const debouncedService = useDebounced(JSON.stringify({serviceAmount, fieldValues}));
-  const quoteId = useRef(0);
+  const serviceState = JSON.stringify({serviceAmount, fieldValues});
+  const debouncedService = useDebounced(serviceState);
   const serviceFormValid = !!recipient.quote && (recipient.extraFields || []).every((f, i) => !(f.required && (f.type === 'text' || f.type === 'select') && !fieldValues[i]));
 
   useEffect(() => {
@@ -335,6 +366,8 @@ export function Send() {
     const deliver: Amount = isNativeCode
       ? xrpToDrops(new BigNumber(value).toFixed(6, BigNumber.ROUND_DOWN))
       : {currency: realCode(code), issuer: destination, value};
+    // Options found for the previous amount or recipient must not stay clickable.
+    setPaths([]);
     setFound(false);
     setFinding(true);
     setSendError('');
@@ -380,16 +413,26 @@ export function Send() {
     if ((tag && !validTag(tag)) || (!tag && recipient.tagRequired) || msgInvalid) return;
     // Only confirm the amount the payment options were found for.
     if (!isDecimal(amount) || amount !== debouncedAmount) return;
-    setChosen(option ?? {origin: null, code: native.code, value: amount, rate: '1'});
+    // Every lookup must have finished for what is on screen now.
+    if (input.trim() !== debouncedInput || serviceState !== debouncedService || recipient.loading || quoteState.loading) return;
+    if (!isValidAddress(recipient.address) || (!option && !isNativeCode)) return;
+    // From here a late reply can't change the payment.
+    resolveId.current++;
+    quoteId.current++;
+    setReview({
+      label: input.trim(), address: recipient.address, code, isNative: isNativeCode, amount, tag, msg,
+      memos: recipient.memos.filter(m => m.data), invoice: recipient.invoice,
+      option: option ?? {origin: null, code: native.code, value: amount, rate: '1'}
+    });
     stopPath();
     setMode('confirm');
   };
 
   const confirm = async () => {
-    if (!chosen) return;
+    if (!review) return;
     setMode('submit');
     setSendError('');
-    const alt = chosen.origin;
+    const alt = review.option.origin;
     let source: Value;
     if (alt) {
       if (typeof alt.source_amount === 'string') {
@@ -399,13 +442,15 @@ export function Send() {
         source = {currency: sa.currency, issuer: sa.issuer, value: new BigNumber(sa.value).multipliedBy(1.01).toString(10)};
       }
     } else {
-      source = {currency: 'XRP', value: amount};
+      source = {currency: 'XRP', value: review.amount};
     }
-    const delivered: Value = isNativeCode ? {currency: 'XRP', value: amount} : {currency: realCode(code), issuer: recipient.address, value: amount};
-    const memos = [...recipient.memos];
-    if (msg) memos.push({data: msg, type: 'msg', format: 'text'});
+    const delivered: Value = review.isNative
+      ? {currency: 'XRP', value: review.amount}
+      : {currency: realCode(review.code), issuer: review.address, value: review.amount};
+    const memos = [...review.memos];
+    if (review.msg) memos.push({data: review.msg, type: 'msg', format: 'text'});
     const hash = await tx.run('send', () => payment({
-      destination: recipient.address, source, delivered, tag: tag || null, invoice: recipient.invoice || null, memos,
+      destination: review.address, source, delivered, tag: review.tag || null, invoice: review.invoice || null, memos,
       paths: alt?.paths_computed?.length ? alt.paths_computed : undefined
     }));
     if (hash) {
@@ -418,15 +463,17 @@ export function Send() {
     tx.clear('send');
     setMode('input');
     setAmount('');
-    setChosen(null);
+    setReview(null);
     setSendError('');
   };
 
   const status = tx.status.send;
   // A recipient that imitates a contact or this wallet's own address (address poisoning).
-  const lookalike = recipient.address && !recipient.invalid && myAddress
-    ? findLookalike(recipient.address, [{name: '', address: myAddress}, ...contacts.map(c => ({name: c.name, address: c.address}))])
+  const lookalikeOf = (value: string) => value && myAddress
+    ? findLookalike(value, [{name: '', address: myAddress}, ...contacts.map(c => ({name: c.name, address: c.address}))])
     : null;
+  const lookalike = recipient.invalid ? null : lookalikeOf(recipient.address);
+  const reviewLookalike = review ? lookalikeOf(review.address) : null;
   const showFields = !(recipient.federation && recipient.quote);
   const directOption = isNativeCode && (!recipient.federation || recipient.extraFields) && Number(amount) > 0 && amountValid;
   const secondsAgo = lastUpdate === null ? 0 : Math.max(0, Math.round((now - lastUpdate) / 1000));
@@ -468,6 +515,8 @@ export function Send() {
   };
 
   const url = txUrl(status?.hash);
+  const typed = input.trim();
+  const lookupTarget = !findContact(typed) && lookup !== typed ? parseFederationAddress(typed) : null;
 
   return (
     <>
@@ -485,14 +534,21 @@ export function Send() {
               <div className="field">
                 <label htmlFor="recipient">{t('recipient')}</label>
                 <input id="recipient" type="text" className="input mono" required value={input} placeholder={t('name_or_address')} list="contacts"
-                  onChange={e => setInput(e.target.value)} autoComplete="off" spellCheck={false} />
+                  onChange={e => { setInput(e.target.value); setLookup(''); }} autoComplete="off" spellCheck={false}
+                  onKeyDown={e => { if (e.key === 'Enter' && lookupTarget) { e.preventDefault(); setLookup(typed); } }} />
                 <datalist id="contacts">
                   {contacts.map(c => <option key={c.name} value={c.name}>{c.address}</option>)}
                 </datalist>
+                {lookupTarget && (
+                  <div className="stack-sm mt-8">
+                    <button type="button" className="btn btn-secondary btn-sm align-self-start" onClick={() => setLookup(typed)}><i className="fa fa-search" /> {t('federation_lookup')}</button>
+                    <div className="hint">{t('federation_lookup_hint', {domain: lookupTarget.domain})}</div>
+                  </div>
+                )}
                 {recipient.address && input.trim() !== recipient.address && !recipient.invalid && (
                   <div className="form-success mono"><i className="fa fa-check-circle" /> {recipient.address}</div>
                 )}
-                {recipient.invalid && input && <div className="form-error">{t('invalid_address')}</div>}
+                {recipient.invalid && input && <div className="form-error">{t(recipient.wrongNetwork ? 'x_address_wrong_network' : 'invalid_address')}</div>}
                 {recipient.loading && <div className="hint"><span className="spinner" /> {t('account_loading')} {input}</div>}
               </div>
               {lookalike && <div className="alert alert-warning"><i className="fa fa-exclamation-triangle" /><span>{lookalike.name ? t('send_lookalike', {name: lookalike.name, address: lookalike.address}) : t('send_lookalike_self')}</span></div>}
@@ -609,7 +665,7 @@ export function Send() {
         </div>
       )}
 
-      {mode === 'confirm' && chosen && (
+      {mode === 'confirm' && review && (
         <div className="card confirm-card">
           <div className="card-body stack">
             <div className="text-center">
@@ -619,23 +675,26 @@ export function Send() {
             <div className="summary-box">
               <div className="summary-row">
                 <span className="k">{t('recipient')}</span>
-                <span className="v mono">{input}{recipient.address !== input.trim() && <span className="block text-xs text-faint">{recipient.address}</span>}</span>
+                <span className="v mono break">{review.address !== review.label && <span className="block text-xs">{review.label}</span>}{review.address}</span>
               </div>
-              {tag && <div className="summary-row"><span className="k">{t('dest_tag')}</span><span className="v">{tag}</span></div>}
-              {msg && <div className="summary-row"><span className="k">{t('message')}</span><span className="v">{msg}</span></div>}
-              {recipient.memos.filter(m => m.data).map((m, i) => (
+              {review.tag && <div className="summary-row"><span className="k">{t('dest_tag')}</span><span className="v">{review.tag}</span></div>}
+              {review.msg && <div className="summary-row"><span className="k">{t('message')}</span><span className="v">{review.msg}</span></div>}
+              {review.memos.map((m, i) => (
                 <div className="summary-row" key={i}><span className="k">{t('message')}</span><span className="v">{m.data}</span></div>
               ))}
-              {recipient.invoice && <div className="summary-row"><span className="k">{t('invoice')}</span><span className="v mono break">{recipient.invoice}</span></div>}
-              <div className="summary-row"><span className="k">{t('will_receive')}</span><span className="v summary-big">{new BigNumber(amount).toString(10)} {fmtCode(code, native.code)}</span></div>
+              {review.invoice && <div className="summary-row"><span className="k">{t('invoice')}</span><span className="v mono break">{review.invoice}</span></div>}
+              <div className="summary-row"><span className="k">{t('will_receive')}</span><span className="v summary-big">{new BigNumber(review.amount).toString(10)} {fmtCode(review.code, native.code)}</span></div>
               <div className="summary-row">
                 <span className="k">{t('pay_most')}</span>
-                <span className="v">{chosen.value} {fmtCode(chosen.code)} {chosen.origin && <span className="text-faint">± 1%</span>}</span>
+                <span className="v">
+                  {review.option.value} {fmtCode(review.option.code)} {review.option.origin && <span className="text-faint">± 1%</span>}
+                  {review.option.issuer && <span className="block text-xs text-faint mono break">{t('issuer')}: {review.option.issuer}</span>}
+                </span>
               </div>
             </div>
-            {lookalike && <div className="alert alert-warning"><i className="fa fa-exclamation-triangle" /><span>{lookalike.name ? t('send_lookalike', {name: lookalike.name, address: lookalike.address}) : t('send_lookalike_self')}</span></div>}
+            {reviewLookalike && <div className="alert alert-warning"><i className="fa fa-exclamation-triangle" /><span>{reviewLookalike.name ? t('send_lookalike', {name: reviewLookalike.name, address: reviewLookalike.address}) : t('send_lookalike_self')}</span></div>}
             <div className="grid-2">
-              <button type="button" onClick={() => setMode('input')} className="btn btn-secondary btn-lg"><i className="fa fa-arrow-left" /> {t('back')}</button>
+              <button type="button" onClick={() => { setReview(null); setMode('input'); }} className="btn btn-secondary btn-lg"><i className="fa fa-arrow-left" /> {t('back')}</button>
               <button type="button" onClick={confirm} className="btn btn-primary btn-lg"><i className="fa fa-check" /> {t('confirm')}</button>
             </div>
           </div>
@@ -661,11 +720,18 @@ export function Send() {
                 <p className="text-danger">{t(status.error || '')}</p>
               </div>
             )}
+            {status?.state === 'unknown' && (
+              <div>
+                <div className="confirm-icon info"><i className="fa fa-question" /></div>
+                <h2>{t('tx_unknown_title')}</h2>
+                <p className="text-muted">{t('tx_unknown')}</p>
+              </div>
+            )}
             {status?.hash && <div className="mono text-xs text-faint break">{status.hash}</div>}
             {!status?.working && (
               <div className="cluster justify-center">
                 {url && <button type="button" className="btn btn-secondary" onClick={() => openExternal(url)}><i className="fa fa-external-link" /> {t('view_explorer')}</button>}
-                <button type="button" className="btn btn-secondary" onClick={restart}><i className="fa fa-repeat" /> {t('another_payment')}</button>
+                {status?.state !== 'submitted' && status?.state !== 'unknown' && <button type="button" className="btn btn-secondary" onClick={restart}><i className="fa fa-repeat" /> {t('another_payment')}</button>}
                 <button type="button" className="btn btn-primary" onClick={() => navigate('/balance')}>{t('go_balance')}</button>
               </div>
             )}

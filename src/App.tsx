@@ -1,4 +1,6 @@
 import {HashRouter, Navigate, Route, Routes} from 'react-router';
+import {ConfirmDialog} from './components/ConfirmDialog';
+import {ErrorBoundary} from './components/ErrorBoundary';
 import {AuthLayout, Shell} from './components/Shell';
 import {ToastStack} from './components/ToastStack';
 import {Account} from './pages/Account';
@@ -42,19 +44,22 @@ const PAGES: Record<string, () => React.JSX.Element> = {
 
 export function App() {
   return (
-    <HashRouter>
-      <Routes>
-        <Route element={<AuthLayout />}>
-          <Route path="/login" element={<Login />} />
-          <Route path="/register" element={<Register />} />
-        </Route>
-        <Route element={<Shell />}>
-          <Route path="/" element={<Navigate to="/balance" replace />} />
-          {Object.entries(PAGES).map(([path, Page]) => <Route key={path} path={path} element={<Page />} />)}
-        </Route>
-        <Route path="*" element={<Navigate to="/login" replace />} />
-      </Routes>
-      <ToastStack />
-    </HashRouter>
+    <ErrorBoundary>
+      <HashRouter>
+        <Routes>
+          <Route element={<AuthLayout />}>
+            <Route path="/login" element={<Login />} />
+            <Route path="/register" element={<Register />} />
+          </Route>
+          <Route element={<Shell />}>
+            <Route path="/" element={<Navigate to="/balance" replace />} />
+            {Object.entries(PAGES).map(([path, Page]) => <Route key={path} path={path} element={<Page />} />)}
+          </Route>
+          <Route path="*" element={<Navigate to="/login" replace />} />
+        </Routes>
+        <ToastStack />
+        <ConfirmDialog />
+      </HashRouter>
+    </ErrorBoundary>
   );
 }

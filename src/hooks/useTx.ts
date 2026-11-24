@@ -6,7 +6,7 @@ import {on, type TxEvent} from '../core/events';
 
 export interface TxStatusState {
   working?: boolean;
-  state?: 'submitted' | 'success' | 'fail' | 'error';
+  state?: 'submitted' | 'success' | 'fail' | 'error' | 'unknown';
   hash?: string;
   error?: string;
 }
@@ -27,21 +27,23 @@ export function useTx(onSettled?: (success: boolean, tx: TxEvent) => void): TxTr
   settledRef.current = onSettled;
 
   useEffect(() => {
-    const settle = (tx: TxEvent, state: 'success' | 'fail') => {
+    const settle = (tx: TxEvent, state: 'success' | 'fail' | 'unknown') => {
       const names = Object.keys(statusRef.current).filter(k => statusRef.current[k].hash === tx.hash);
       if (!names.length) return;
       setStatus(s => {
         const next = {...s};
-        for (const name of names) next[name] = {...next[name], state, error: state === 'fail' ? tx.message : undefined};
+        for (const name of names) next[name] = {...next[name], state, error: state === 'success' ? undefined : tx.message};
         return next;
       });
       settledRef.current?.(state === 'success', tx);
     };
     const offSuccess = on('txSuccess', tx => settle(tx, 'success'));
     const offFail = on('txFail', tx => settle(tx, 'fail'));
+    const offUnknown = on('txUnknown', tx => settle(tx, 'unknown'));
     return () => {
       offSuccess();
       offFail();
+      offUnknown();
     };
   }, []);
 

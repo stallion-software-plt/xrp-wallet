@@ -3,7 +3,7 @@ import {useNavigate} from 'react-router';
 import {useTranslation} from 'react-i18next';
 import BigNumber from 'bignumber.js';
 import {xrpToDrops, type Amount} from 'xrpl';
-import {fmtCode, fmtNum, isDecimal, round} from '../core/format';
+import {assetKey, fmtCode, fmtNum, isDecimal, round, short} from '../core/format';
 import {getGateway} from '../core/gateways';
 import {useDebounced} from '../hooks/useDebounced';
 import {useTx} from '../hooks/useTx';
@@ -22,6 +22,14 @@ interface Option {
   rate: string;
 }
 
+/** The asset to receive. The same code from two issuers is two different tokens. */
+interface Target {
+  key: string;
+  code: string;
+  issuer?: string;
+  label: string;
+}
+
 export function Swap() {
   const {t} = useTranslation();
   const navigate = useNavigate();
@@ -31,7 +39,7 @@ export function Swap() {
   const tx = useTx();
   const [mode, setMode] = useState<'input' | 'confirm' | 'submit'>('input');
   const [amount, setAmount] = useState('');
-  const [code, setCode] = useState(native.code);
+  const [targetKey, setTargetKey] = useState(native.code);
   const [options, setOptions] = useState<Record<string, Option>>({});
   const [finding, setFinding] = useState(false);
   const [found, setFound] = useState(false);
@@ -41,13 +49,20 @@ export function Swap() {
   const [chosen, setChosen] = useState<Option | null>(null);
   const debouncedAmount = useDebounced(amount.trim());
 
-  const codes = useMemo(() => {
-    const list = [native.code];
+  const targets = useMemo(() => {
+    const list: Target[] = [{key: native.code, code: native.code, label: fmtCode(native.code)}];
     for (const line of lines) {
-      if (!line.currency.startsWith('03') && !list.includes(line.currency)) list.push(line.currency);
+      if (line.currency.startsWith('03')) continue;
+      const key = assetKey(line.currency, line.issuer);
+      if (list.some(item => item.key === key)) continue;
+      const gateway = getGateway(network, line.currency, line.issuer);
+      list.push({key, code: line.currency, issuer: line.issuer, label: `${fmtCode(line.currency)} · ${gateway.name || short(line.issuer, 8, 4)}`});
     }
     return list;
-  }, [lines, native.code]);
+  }, [lines, native.code, network]);
+  const target = targets.find(item => item.key === targetKey) ?? targets[0];
+  const code = target.code;
+  const targetIssuer = target.issuer;
 
   useEffect(() => () => closePathFind(), []);
   useEffect(() => {
@@ -69,7 +84,7 @@ export function Swap() {
     }
     const deliver: Amount = code === native.code
       ? xrpToDrops(new BigNumber(debouncedAmount).toFixed(6, BigNumber.ROUND_DOWN))
-      : {currency: code, issuer: address, value: debouncedAmount};
+      : {currency: code, issuer: targetIssuer!, value: debouncedAmount};
     setFinding(true);
     void openPathFind(address, address, deliver, data => {
       setLastUpdate(Date.now());
@@ -81,7 +96,8 @@ export function Swap() {
           next[native.code] = {origin: alt, code: native.code, value: String(round(xrp, 6)), rate: String(round(xrp / value, 6))};
         } else {
           const sa = alt.source_amount as {currency: string; issuer?: string; value: string};
-          next[sa.currency] = {origin: alt, code: sa.currency, issuer: sa.issuer, value: String(round(Number(sa.value), 6)), rate: String(round(Number(sa.value) / value, 6))};
+          if (sa.currency === code && sa.issuer === targetIssuer) continue;
+          next[assetKey(sa.currency, sa.issuer)] = {origin: alt, code: sa.currency, issuer: sa.issuer, value: String(round(Number(sa.value), 6)), rate: String(round(Number(sa.value) / value, 6))};
         }
       }
       setOptions(next);
@@ -90,7 +106,7 @@ export function Swap() {
       setFinding(false);
       closePathFind();
     });
-  }, [mode, debouncedAmount, code, address, native.code]);
+  }, [mode, debouncedAmount, code, targetIssuer, address, native.code]);
 
   const pick = (option: Option) => {
     // Only confirm the amount the options were found for.
@@ -108,7 +124,8 @@ export function Swap() {
     const source: Value = typeof sa === 'string'
       ? {currency: 'XRP', value: new BigNumber(sa).multipliedBy(1.01).dividedBy(1e6).toString(10)}
       : {currency: (sa as {currency: string}).currency, issuer: (sa as {issuer?: string}).issuer, value: new BigNumber((sa as {value: string}).value).multipliedBy(1.01).toString(10)};
-    const delivered: Value = code === native.code ? {currency: 'XRP', value: amount} : {currency: code, issuer: address!, value: amount};
+    // The exact issuer: the account's own address here would accept any issuer's token of this code.
+    const delivered: Value = code === native.code ? {currency: 'XRP', value: amount} : {currency: code, issuer: targetIssuer!, value: amount};
     await tx.run('swap', () => convert(source, delivered, chosen.origin.paths_computed));
   };
 
@@ -145,8 +162,8 @@ export function Swap() {
                 <div className="input-group lg">
                   <input id="swap_amount" type="number" autoComplete="off" placeholder="0.00" className="input" value={amount} onChange={e => setAmount(e.target.value)} />
                   <div className="select-addon">
-                    <select value={code} onChange={e => setCode(e.target.value)} disabled={codes.length < 2}>
-                      {codes.map(c => <option key={c} value={c}>{fmtCode(c)}</option>)}
+                    <select value={target.key} onChange={e => setTargetKey(e.target.value)} disabled={targets.length < 2}>
+                      {targets.map(item => <option key={item.key} value={item.key}>{item.label}</option>)}
                     </select>
                   </div>
                 </div>
@@ -164,11 +181,12 @@ export function Swap() {
                   {!finding && !found && <div className="empty"><div className="empty-icon"><i className="fa fa-exchange" /></div><div>{t('convert_input')}</div></div>}
                   {found && !list.length && <div className="empty"><div className="empty-icon"><i className="fa fa-random" /></div><div>{t('convert_nopath')}</div></div>}
                   {list.map(option => (
-                    <button type="button" key={option.code} className="path-option" onClick={() => pick(option)} disabled={readOnly}>
+                    <button type="button" key={assetKey(option.code, option.issuer)} className="path-option" onClick={() => pick(option)} disabled={readOnly}>
                       <span className="asset-logo sm"><img src={getGateway(network, option.code, option.issuer).logo} alt="" /></span>
                       <span className="grow text-left">
                         <span className="fw-600 num">{option.value} {fmtCode(option.code)}</span>
                         <span className="text-xs text-faint block">{t('rate')} {option.rate} {fmtCode(option.code)}/{fmtCode(code)}</span>
+                        {option.issuer && <span className="text-xs text-faint block mono">{t('issuer')}: {short(option.issuer, 8, 6)}</span>}
                       </span>
                       <i className="fa fa-arrow-right" />
                     </button>
@@ -188,8 +206,14 @@ export function Swap() {
                 <h2>{t('confirm_swap')}</h2>
               </div>
               <div className="summary-box">
-                <div className="summary-row"><span className="k">{t('you_pay')}</span><span className="v">{chosen.value} {fmtCode(chosen.code)}</span></div>
-                <div className="summary-row"><span className="k">{t('receive')}</span><span className="v summary-big">{new BigNumber(amount).toString(10)} {fmtCode(code, native.code)}</span></div>
+                <div className="summary-row">
+                  <span className="k">{t('you_pay')}</span>
+                  <span className="v">{chosen.value} {fmtCode(chosen.code)}{chosen.issuer && <span className="block text-xs text-faint mono break">{t('issuer')}: {chosen.issuer}</span>}</span>
+                </div>
+                <div className="summary-row">
+                  <span className="k">{t('receive')}</span>
+                  <span className="v"><span className="summary-big">{new BigNumber(amount).toString(10)} {fmtCode(code, native.code)}</span>{targetIssuer && <span className="block text-xs text-faint mono break">{t('issuer')}: {targetIssuer}</span>}</span>
+                </div>
                 <div className="summary-row"><span className="k">{t('pay_most')}</span><span className="v">{chosen.value} {fmtCode(chosen.code)} <span className="text-faint">± 1%</span></span></div>
               </div>
               <div className="grid-2">
@@ -219,10 +243,17 @@ export function Swap() {
                   <p className="text-danger">{t(status.error || '')}</p>
                 </div>
               )}
+              {status?.state === 'unknown' && (
+                <div>
+                  <div className="confirm-icon info"><i className="fa fa-question" /></div>
+                  <h2>{t('tx_unknown_title')}</h2>
+                  <p className="text-muted">{t('tx_unknown')}</p>
+                </div>
+              )}
               {!status?.working && (
                 <div className="cluster justify-center">
                   {url && <button type="button" className="btn btn-secondary" onClick={() => openExternal(url)}><i className="fa fa-external-link" /> {t('view_explorer')}</button>}
-                  <button type="button" className="btn btn-secondary" onClick={restart}><i className="fa fa-repeat" /> {t('back_convert')}</button>
+                  {status?.state !== 'submitted' && status?.state !== 'unknown' && <button type="button" className="btn btn-secondary" onClick={restart}><i className="fa fa-repeat" /> {t('back_convert')}</button>}
                   <button type="button" className="btn btn-primary" onClick={() => navigate('/balance')}>{t('go_balance')}</button>
                 </div>
               )}

@@ -5,6 +5,7 @@ import {wordlist as chinese} from '@scure/bip39/wordlists/simplified-chinese.js'
 import {wordlist as japanese} from '@scure/bip39/wordlists/japanese.js';
 import {ECDSA, isValidClassicAddress, isValidSecret as xrplIsValidSecret, Wallet} from 'xrpl';
 import {derivePath} from './hd';
+import type {NetworkType} from './settings';
 
 export type MnemonicLang = 'en' | 'cn' | 'jp';
 
@@ -17,6 +18,13 @@ export interface Keypair {
 
 export function isValidAddress(address: string | undefined | null): boolean {
   return !!address && isValidClassicAddress(address.trim());
+}
+
+/** X-addresses say whether they are for a test network. Forks and custom networks have no fixed rule. */
+export function xAddressFitsNetwork(isTest: boolean, networkType: NetworkType): boolean {
+  if (networkType === 'xrp') return !isTest;
+  if (networkType === 'xrpTestnet' || networkType === 'xrpTest') return isTest;
+  return true;
 }
 
 export function isValidSecret(secret: string | undefined | null): boolean {

@@ -41,6 +41,9 @@ Actions minutes a month (macOS minutes count ten times).
    systems and `SHA256SUMS.txt` are there, the generated notes are right, and the installer opens a
    wallet on the Testnet. Then they publish it.
 
-In a public repository each installer also gets a signed build provenance attestation, checked with
-`gh attestation verify <file> --repo <owner>/<repo>`. Private repositories on GitHub's free plans
-skip this step.
+The tag must be `vX.Y.Z` or, for a pre-release, `vX.Y.Z.alpha`, with `X.Y.Z` equal to the version in
+`package.json`. Alpha tags create a draft marked as a pre-release.
+
+Each public release installer also gets a signed build provenance attestation, checked with
+`gh attestation verify <file> --repo <owner>/<repo>`. This needs a public repository, so while the
+repository is private the workflow accepts only alpha tags, and those have no attestation.

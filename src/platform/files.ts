@@ -87,3 +87,27 @@ export async function writeTextFile(path: string, text: string): Promise<void> {
     throw err;
   }
 }
+
+/** Writes a new file and refuses to touch one that already exists: it may hold another wallet's key. */
+export async function createTextFile(path: string, text: string): Promise<void> {
+  if (path.startsWith(BROWSER_PREFIX)) return writeTextFile(path, text);
+  const fs = nodeModule<typeof import('node:fs')>('fs');
+  let handle: import('node:fs').promises.FileHandle;
+  try {
+    handle = await fs.promises.open(path, 'wx', 0o600);
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code === 'EEXIST') throw new Error('wallet_file_exists');
+    if (code === 'EACCES' || code === 'EPERM') throw new Error('Permission denied. Please choose another location.');
+    throw err;
+  }
+  try {
+    await handle.writeFile(text, 'utf8');
+    await handle.sync();
+    await handle.close();
+  } catch (err) {
+    await handle.close().catch(() => {});
+    await fs.promises.rm(path, {force: true}).catch(() => {});
+    throw err;
+  }
+}

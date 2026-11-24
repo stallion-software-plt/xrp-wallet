@@ -5,6 +5,7 @@ import * as session from '../core/session';
 import {useAutoLock} from '../hooks/useAutoLock';
 import {useAccount} from '../state/account';
 import {useApp} from '../state/app';
+import {ErrorBoundary} from './ErrorBoundary';
 import {Sidebar} from './Sidebar';
 import {Topbar} from './Topbar';
 
@@ -44,7 +45,7 @@ export function Shell() {
         {readOnly && (
           <div className="banner warning"><i className="fa fa-eye" /> <span>{t('watch_only_banner')}</span></div>
         )}
-        <main className="content"><Outlet /></main>
+        <main className="content"><ErrorBoundary key={pathname}><Outlet /></ErrorBoundary></main>
         <footer className="app-footer">
           <span>XRP Wallet · {t('version')} {__APP_VERSION__}</span>
           <span className="spacer" />

@@ -32,3 +32,12 @@ describe('activity scam warnings', () => {
     expect(payment(fakeMe, me, '25000000').warning).toEqual({kind: 'lookalike', name: ''});
   });
 });
+
+describe('activity amounts', () => {
+  it('does not fail or show the full amount when delivered_amount is unavailable', () => {
+    const tx = {TransactionType: 'Payment', Account: bob, Destination: me, Amount: '5000000000', Fee: '12', hash: 'AB', date: 800000000};
+    const meta = {TransactionResult: 'tesSUCCESS', AffectedNodes: [], TransactionIndex: 0, delivered_amount: 'unavailable'} as unknown as TransactionMetadata;
+    const row = processTx(tx, meta, ctx);
+    expect(row.amounts.map(a => a.value).join(' ')).not.toContain('5000');
+  });
+});

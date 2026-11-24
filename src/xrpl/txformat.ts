@@ -111,7 +111,12 @@ function describe(res: TxRow, tx: LedgerTx, meta: TransactionMetadata & Record<s
 
   switch (tx.TransactionType) {
     case 'Payment': {
-      const delivered = parseAmount(meta.delivered_amount ?? meta.DeliveredAmount ?? tx.Amount)!;
+      const reported = meta.delivered_amount ?? meta.DeliveredAmount ?? tx.Amount;
+      // Very old ledgers report "unavailable": use what actually reached this account, never tx.Amount,
+      // which a partial payment can overstate.
+      const delivered = reported === 'unavailable'
+        ? changes.find(c => Number(c.value) > 0) ?? {...parseAmount(tx.Amount)!, value: '0'}
+        : parseAmount(reported)!;
       if (mine && tx.Destination === account) {
         set('tx_swap', 'fa-exchange', 'accent', 'trading');
         const spent = changes.filter(c => Number(c.value) < 0 && !(c.currency === 'XRP' && isFee(c, tx)));

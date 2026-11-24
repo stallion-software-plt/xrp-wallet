@@ -1,7 +1,8 @@
 // Short notifications, including transaction progress.
 import {create} from 'zustand';
 import {on} from '../core/events';
-import {clearClipboard, copyText, readClipboardText} from '../platform/desktop';
+import {isOpen, onSessionChange} from '../core/session';
+import {clearClipboardIfHolding, copyText, onWindowClose} from '../platform/desktop';
 
 export interface Toast {
   id: number;
@@ -33,19 +34,33 @@ export function showToast(options: Omit<Toast, 'id'> & {duration?: number}): voi
 }
 
 const SECRET_CLIPBOARD_MS = 30000;
+let copiedSecret: string | null = null;
+let secretTimer: ReturnType<typeof setTimeout> | undefined;
+
+function clearCopiedSecret(): void {
+  clearTimeout(secretTimer);
+  const text = copiedSecret;
+  copiedSecret = null;
+  if (text) void clearClipboardIfHolding(text).catch(() => {});
+}
+
+onSessionChange(() => {
+  if (!isOpen()) clearCopiedSecret();
+});
+onWindowClose(clearCopiedSecret);
 
 /** Copies text and confirms with a toast. A `secret` is not shown in the toast, and is cleared from
- *  the clipboard after 30 seconds unless something else was copied since. */
+ *  the clipboard after 30 seconds, or when the wallet locks or the app closes, unless something else
+ *  was copied since. */
 export async function copy(text: string | null | undefined, options: {secret?: boolean} = {}): Promise<void> {
   if (!text) return;
   try {
     await copyText(text);
     if (options.secret) {
       showToast({type: 'copy', title: 'copied', message: 'copied_secret'});
-      setTimeout(async () => {
-        const current = await readClipboardText();
-        if (current === null || current === text) await clearClipboard().catch(() => {});
-      }, SECRET_CLIPBOARD_MS);
+      clearTimeout(secretTimer);
+      copiedSecret = text;
+      secretTimer = setTimeout(clearCopiedSecret, SECRET_CLIPBOARD_MS);
     } else {
       showToast({type: 'copy', title: 'copied', message: text.length > 64 ? text.substring(0, 61) + '...' : text});
     }
@@ -57,3 +72,4 @@ export async function copy(text: string | null | undefined, options: {secret?: b
 on('txSubmitted', tx => showToast({type: 'info', title: 'tx_submitted_title', message: tx.type, hash: tx.hash}));
 on('txSuccess', tx => showToast({type: 'success', title: 'tx_validated_title', message: tx.type, hash: tx.hash}));
 on('txFail', tx => showToast({type: 'error', title: 'tx_failed_title', message: tx.message, hash: tx.hash}));
+on('txUnknown', tx => showToast({type: 'error', title: 'tx_unknown_title', message: tx.message, hash: tx.hash}));

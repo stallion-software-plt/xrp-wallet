@@ -17,9 +17,10 @@ Settings.
 
 | When you... | The app contacts | What it sends |
 |---|---|---|
-| Send to a `name@domain` address | that domain and the service it lists | the name, your address, the network, your language and the app version |
+| Click **Look up** on a `name@domain` address in Send | that domain, the service it lists, and any server hosting an image in that service's form | the name, your address, the network, your language and the app version (image servers see only your IP) |
 | Look up an issuer domain on the Tokens page | that domain (`xrp-ledger.toml` or `ripple.txt`) | nothing beyond the request |
-| Click **Deposit** on a token | that token's gateway | your address, the currency, your language |
+| Click **Deposit** on a token | that token's gateway, and the server hosting the logo it returns | your address, the currency, your language (the logo server sees only your IP) |
+| Click **Accept** on an NFT offer | the other XRP Ledger servers listed in Settings | the offer ID, to confirm its price |
 | Turn on **Show NFT images** | the servers chosen by each NFT's creator, or `ipfs.io` | nothing beyond the request (they see your IP) |
 | Click **Fund from faucet** on a test network | the XRPL test faucet | your test address |
 | Open an explorer link | your web browser opens the site | the link |

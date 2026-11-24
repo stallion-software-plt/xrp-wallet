@@ -108,7 +108,8 @@ export function Trade() {
 
   const refreshAmm = useCallback(async () => {
     const {base: b, counter: c} = pairRef.current;
-    const amm = await getAmm(ledgerAsset(b), ledgerAsset(c));
+    // A server that answers with another pool counts as no pool for this pair.
+    const amm = await getAmm(ledgerAsset(b), ledgerAsset(c)).catch(() => null);
     if (pairRef.current.base === b && pairRef.current.counter === c) setAmmExists(!!amm);
   }, [ledgerAsset]);
 
@@ -209,7 +210,7 @@ export function Trade() {
   // An offer is being cancelled while its cancel transaction is working or pending.
   const cancelState = (seq: number) => tx.status[`cancel${seq}`];
   const isCancelling = (seq: number) => !!cancelState(seq) && (cancelState(seq).working || cancelState(seq).state === 'submitted' || cancelState(seq).state === 'success');
-  const cancelError = Object.entries(tx.status).find(([name, s]) => name.startsWith('cancel') && (s.state === 'error' || s.state === 'fail'))?.[1].error;
+  const cancelError = Object.entries(tx.status).find(([name, s]) => name.startsWith('cancel') && (s.state === 'error' || s.state === 'fail' || s.state === 'unknown'))?.[1].error;
   const cancel = (seq: number) => void tx.run(`cancel${seq}`, () => cancelOffer(seq));
 
   const flip = () => {
@@ -272,7 +273,7 @@ export function Trade() {
         <div className="between text-sm"><span className="text-faint">{t('you_have')}</span><span className="num fw-600">{fmtNum(have)} {fmtCode(haveCode)}</span></div>
         {st?.state === 'submitted' && <div className="alert alert-info"><i className="fa fa-clock-o" /><span>{t('submitted')}</span></div>}
         {st?.state === 'success' && <div className="alert alert-success"><i className="fa fa-check" /><span>{t('offer_success')}</span></div>}
-        {(st?.state === 'error' || st?.state === 'fail') && <div className="alert alert-error"><i className="fa fa-exclamation-circle" /><span>{t(st.error || '')}</span></div>}
+        {(st?.state === 'error' || st?.state === 'fail' || st?.state === 'unknown') && <div className="alert alert-error"><i className="fa fa-exclamation-circle" /><span>{t(st.error || '')}</span></div>}
         {!fatFinger[which] ? (
           <button type="button" className={`btn ${which === 'buy' ? 'btn-success' : 'btn-danger'} btn-lg btn-block`} onClick={() => placeWithCheck(which)}
             disabled={tx.busy(which) || readOnly || !(Number(form.amount) > 0) || !(Number(form.price) > 0)}>
