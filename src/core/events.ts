@@ -10,6 +10,8 @@ export interface EventMap {
   txSubmitted: TxEvent;
   txSuccess: TxEvent;
   txFail: TxEvent;
+  /** The result could not be established: the transaction may or may not have applied. */
+  txUnknown: TxEvent;
   /** A transaction affecting the open account (from the subscription stream). */
   accountTx: unknown;
 }

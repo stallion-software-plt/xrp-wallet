@@ -68,14 +68,14 @@ function fresh(dir) {
 // stops the build, so a tampered mirror or release can't end up in what users install.
 // NW.js: https://dl.nwjs.io/v<version>/SHASUMS256.txt (update these when changing build.nwVersion).
 const NW_SHA256 = {
-  'nwjs-v0.118.0-win-x64.zip': '43a03d39a2402f2f9cd9982b56d8dd513d8e4f289cd34253af7deb8c45e58df2',
-  'nwjs-v0.118.0-linux-x64.tar.gz': 'c6270b40ca9880ba7e48682164c0a9d5dba45951c0b72ea42cab7e5b3128f69d',
-  'nwjs-v0.118.0-osx-x64.zip': '8e090933806ff097e46afccb6f5736293a0a2c7cbcd11b2c88b356616e897d86',
-  'nwjs-v0.118.0-osx-arm64.zip': '0f59d2e7583f798e3efe611fcf4cb21a94a80098ac88f7768cd3eb9e16242625',
-  'nwjs-sdk-v0.118.0-win-x64.zip': '687f78233a56f19185a0ca9b638e114620f3335f4c4b01f2801f3664df27b838',
-  'nwjs-sdk-v0.118.0-linux-x64.tar.gz': '90247ee9ceef6210d0f6ce0df62eb59d8ea93b3e6fb36c589f2856ca4dd28bdb',
-  'nwjs-sdk-v0.118.0-osx-x64.zip': '9a272d671ec08601acd0835366a49a4bc593cfaefc95033178bc5b87281c511f',
-  'nwjs-sdk-v0.118.0-osx-arm64.zip': 'f84944490ae14d50b4c4b1edb42ecbbcd96c1a99c6fdbafcd3c8e45f3814efa2'
+  'nwjs-v0.120.0-win-x64.zip': '6778d4e32d099a8760fe2c3e07a2bbdf2ff79f2c0d28bcda62e1329b0965a282',
+  'nwjs-v0.120.0-linux-x64.tar.gz': 'a7502c2489da5731d020f32e0f8cdc4f96b92012de53aa20da05ad82ab8fdbf5',
+  'nwjs-v0.120.0-osx-x64.zip': '13d9ce81f9de4bfc49df5abb3a947a5d3e275b17f0a43cd1a8271575f3266da5',
+  'nwjs-v0.120.0-osx-arm64.zip': '08ed271fb32b41009c96761c3b292bcf9eeeed79aacb64b7b71a54c6563f6e42',
+  'nwjs-sdk-v0.120.0-win-x64.zip': 'fbf6b6267445fcd634335ccbdf7cd21723bf5c83a744f0fcd8bdaeca33ccde66',
+  'nwjs-sdk-v0.120.0-linux-x64.tar.gz': '97baefb1795dc17a3b8e45ebc0361767ddd52aa339a015c627a4381d6945fe9f',
+  'nwjs-sdk-v0.120.0-osx-x64.zip': 'fb7301462dd33c5be28405cc51c1d79174c4f099ca4102709196156c067ff8e3',
+  'nwjs-sdk-v0.120.0-osx-arm64.zip': '09f1ff602fd0ba4aa5e8d48818f56096713787ef0210cfefbdc446ce16255364'
 };
 // WiX: the SHA-512 NuGet publishes for wix 5.0.2 matches this file.
 const WIX_SHA256 = 'f30ef0c74e2a986126539c5780be93ac24e8136eaf723b1937b26272703ae173';
@@ -203,15 +203,9 @@ async function buildApp(appDir, platform, arch, leaf) {
 
 const WIX_VERSION = '5.0.2';
 
-// WiX 5 (MS-RL licensed). Uses `wix` from PATH if present, otherwise downloads the WiX NuGet
-// package and runs it on the installed .NET runtime, so no .NET SDK is required.
+// WiX 5 (MS-RL licensed). Always the pinned NuGet package, never a `wix` from PATH, whose contents
+// nothing checks. It runs on the installed .NET runtime, so no .NET SDK is required.
 async function wix(args) {
-  try {
-    execFileSync('wix', ['--version'], {stdio: 'ignore'});
-    return run('wix', args);
-  } catch {
-    // not on PATH
-  }
   const dir = path.join(CACHE, `wix-${WIX_VERSION}`);
   const nupkg = path.join(dir, 'wix.nupkg');
   if (!fs.existsSync(nupkg)) {

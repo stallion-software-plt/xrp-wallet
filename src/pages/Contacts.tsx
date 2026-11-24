@@ -5,6 +5,7 @@ import {isValidAddress} from '../core/id';
 import * as session from '../core/session';
 import type {Contact} from '../core/walletFile';
 import {useAccount} from '../state/account';
+import {askConfirm} from '../state/confirm';
 import {copy} from '../state/toasts';
 
 const EMAIL = /^[^\s@<>()[\]\\,;:"]+@([a-zA-Z0-9-]+\.)+[a-zA-Z]{2,}$/;
@@ -73,7 +74,7 @@ function ContactRow({entry, contacts, onSave, onRemove}: {
         </div>
         <div className="stack-sm edit-actions">
           <button type="button" disabled={invalid} onClick={() => { onSave(entry.name, toContact(draft, entry)); setDraft(null); }} className="btn btn-primary btn-sm"><i className="fa fa-check" /> {t('save')}</button>
-          <button type="button" className="btn btn-danger-soft btn-sm" onClick={() => window.confirm(t('are_you_sure')) && onRemove(entry.name)}><i className="fa fa-trash-o" /> {t('Delete')}</button>
+          <button type="button" className="btn btn-danger-soft btn-sm" onClick={async () => { if (await askConfirm(t('are_you_sure'))) onRemove(entry.name); }}><i className="fa fa-trash-o" /> {t('Delete')}</button>
           <button type="button" onClick={() => setDraft(null)} className="btn btn-ghost btn-sm">{t('cancel')}</button>
         </div>
       </div>

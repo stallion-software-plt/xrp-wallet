@@ -4,7 +4,7 @@ import BigNumber from 'bignumber.js';
 import {
   AccountSetAsfFlags, AMMDepositFlags, AMMWithdrawFlags, convertStringToHex, dropsToXrp, NFTokenCreateOfferFlags,
   OfferCreateFlags, PaymentChannelClaimFlags, TrustSetFlags, verifyPaymentChannelClaim,
-  type Amount, type LedgerEntry, type Path, type SubmittableTransaction
+  type Amount, type Client, type LedgerEntry, type Path, type SubmitResponse, type SubmittableTransaction
 } from 'xrpl';
 import {hexToAscii, realCode, round, textToHex, toRippleTime} from '../core/format';
 import {emit} from '../core/events';
@@ -12,8 +12,11 @@ import * as session from '../core/session';
 import {useApp} from '../state/app';
 import {parseAmount, toAmount, toAsset, toLedgerAmount, isXrp, type Value} from './amounts';
 import {getMaxFee} from '../core/settings';
-import {getClient} from './connection';
-import {checkFee, checkPrepared} from './signGuard';
+import {poolMatches, type AssetId} from './ammGuard';
+import {askOtherServers, getClient} from './connection';
+import {crossCheckOffer, type OfferCheck, type OfferEntry, type ShownOffer} from './nftGuard';
+import {checkFee, checkNetwork, checkPrepared} from './signGuard';
+import {lookupOutcome} from './txOutcome';
 import {normalizeTx, type LedgerTx, type TxEntry} from './normalize';
 
 type Tx = Record<string, any> & {TransactionType: string};
@@ -70,37 +73,35 @@ function sleep(ms: number) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
-/** Polls until the transaction is validated or can no longer be included in a ledger. */
-async function verify(hash: string, minLedger: number, maxLedger: number, type: string): Promise<void> {
-  const client = await getClient();
+/** Polls until the transaction is validated or provably expired. If neither can be established,
+ *  reports the outcome as unknown instead of failed, so nobody pays twice. */
+async function verify(client: Client, hash: string, minLedger: number, maxLedger: number, type: string): Promise<void> {
   for (let attempt = 0; attempt <= MAX_VERIFY_ATTEMPTS; attempt++) {
     await sleep(2000);
     let latest = 0;
+    let result: {validated?: boolean; meta?: unknown} | null = null;
+    let error: unknown = null;
     try {
       latest = await client.getLedgerIndex();
-      const response = await client.request({command: 'tx', transaction: hash, min_ledger: minLedger, max_ledger: maxLedger});
-      if (response.result.validated) {
-        const meta = response.result.meta;
-        const code = typeof meta === 'object' ? meta.TransactionResult : 'unknown';
-        if (code === 'tesSUCCESS') {
-          emit('txSuccess', {hash, type});
-        } else {
-          emit('txFail', {hash, type, message: code});
-        }
-        return;
-      }
+      result = (await client.request({command: 'tx', transaction: hash, min_ledger: minLedger, max_ledger: maxLedger})).result;
     } catch (err) {
-      if (latest > maxLedger || attempt >= MAX_VERIFY_ATTEMPTS) {
-        emit('txFail', {hash, type, message: errorMessage(err)});
-        return;
-      }
+      error = err;
+    }
+    const outcome = lookupOutcome(result, error, latest, maxLedger);
+    if (outcome.state === 'success') {
+      emit('txSuccess', {hash, type});
+      return;
+    }
+    if (outcome.state === 'failed') {
+      emit('txFail', {hash, type, message: outcome.message});
+      return;
     }
   }
-  emit('txFail', {hash, type, message: 'Not validated'});
+  emit('txUnknown', {hash, type, message: 'tx_unknown'});
 }
 
-/** Autofills, signs and submits. Resolves with the hash once accepted; validation is reported
- *  through the txSuccess / txFail events. */
+/** Autofills, signs and submits. Resolves with the hash once sent; the result is reported through
+ *  the txSuccess / txFail / txUnknown events. */
 export async function submit(tx: Tx): Promise<string> {
   const client = await getClient();
   const account = session.address();
@@ -111,9 +112,20 @@ export async function submit(tx: Tx): Promise<string> {
     const original = structuredClone(tx);
     const prepared = await client.autofill(tx as SubmittableTransaction);
     checkPrepared(original, prepared as unknown as Record<string, unknown>, ledger);
+    checkNetwork(prepared, useApp.getState().network.networkType);
     checkFee(prepared, {maxFeeXRP: getMaxFee(), reserveIncXRP: useApp.getState().reserveInc});
     const {tx_blob, hash} = session.sign(prepared);
-    const response = await client.submit(tx_blob, {failHard: true});
+    const maxLedger = prepared.LastLedgerSequence ?? ledger + 20;
+    let response: SubmitResponse;
+    try {
+      response = await client.submit(tx_blob, {failHard: true});
+    } catch (err) {
+      // No answer doesn't mean not sent: the server may already have relayed it. Follow the hash.
+      console.warn('No answer to submit, tracking the transaction', errorMessage(err));
+      emit('txSubmitted', {hash, type: tx.TransactionType});
+      void verify(client, hash, ledger, maxLedger, tx.TransactionType);
+      return hash;
+    }
     const engine = response.result.engine_result;
     if (engine !== 'tesSUCCESS' && engine !== 'terQUEUED') {
       const message = response.result.engine_result_message;
@@ -122,7 +134,7 @@ export async function submit(tx: Tx): Promise<string> {
       throw error;
     }
     emit('txSubmitted', {hash, type: tx.TransactionType});
-    void verify(hash, ledger, prepared.LastLedgerSequence ?? ledger + 20, tx.TransactionType);
+    void verify(client, hash, ledger, maxLedger, tx.TransactionType);
     return hash;
   } catch (err) {
     console.error(tx.TransactionType, err);
@@ -241,20 +253,23 @@ export interface AmmInfo {
   [field: string]: unknown;
 }
 
+/** The pool of two assets, or null if there is none. Throws if the server answers with another pool. */
 export async function getAmm(asset1: {currency: string; issuer?: string}, asset2: {currency: string; issuer?: string}): Promise<AmmInfo | null> {
+  const selected: [AssetId, AssetId] = [toAsset(asset1.currency, asset1.issuer) as AssetId, toAsset(asset2.currency, asset2.issuer) as AssetId];
+  let info;
   try {
-    const result = await request({
-      command: 'amm_info',
-      asset: toAsset(asset1.currency, asset1.issuer),
-      asset2: toAsset(asset2.currency, asset2.issuer),
-      ledger_index: 'validated'
-    });
-    const info = result.amm;
-    return {...info, amount: parseAmount(info.amount)!, amount2: parseAmount(info.amount2)!};
+    const result = await request({command: 'amm_info', asset: selected[0], asset2: selected[1], ledger_index: 'validated'});
+    info = result.amm;
   } catch (err) {
     if (!isNotFound(err)) console.error('amm_info', err);
     return null;
   }
+  const amount = parseAmount(info?.amount);
+  const amount2 = parseAmount(info?.amount2);
+  if (!amount || !amount2 || !poolMatches(selected, [toAsset(amount.currency, amount.issuer) as AssetId, toAsset(amount2.currency, amount2.issuer) as AssetId])) {
+    throw new Error('amm_wrong_pool');
+  }
+  return {...info, amount, amount2};
 }
 
 export async function getNFTs(address = session.address()!): Promise<any[]> {
@@ -282,6 +297,15 @@ export async function getNFTOffers(nftId: string): Promise<{sell: any[]; buy: an
   };
   const [sell, buy] = await Promise.all([load('nft_sell_offers'), load('nft_buy_offers')]);
   return {sell, buy};
+}
+
+/** Confirms an offer on the other configured servers before the user can accept it. */
+export async function checkNFTOffer(shown: ShownOffer): Promise<OfferCheck> {
+  const replies = await askOtherServers<{node?: OfferEntry}>({command: 'ledger_entry', index: shown.id, ledger_index: 'validated'});
+  return crossCheckOffer(shown, replies.map(reply => {
+    if ('result' in reply) return reply.result.node ?? 'missing';
+    return isNotFound(reply.error, 'entryNotFound') || isNotFound(reply.error, 'objectNotFound') ? 'missing' : null;
+  }));
 }
 
 /** Escrows the account created or receives. The creating sequence number (needed to finish or
@@ -525,6 +549,8 @@ export function ammDelete(asset1: AssetRef, asset2: AssetRef) {
 type DateInput = string | Date | number | null | undefined;
 
 export function createEscrow(opts: {destination: string; amount: string; finishAfter?: DateInput; cancelAfter?: DateInput; condition?: string; destinationTag?: string | number}) {
+  // Without an expiry, a lost fulfillment would lock the funds forever.
+  if (opts.condition?.trim() && !opts.cancelAfter) throw new Error('escrow_condition_needs_expiry');
   const tx: Tx = {TransactionType: 'EscrowCreate', Destination: opts.destination, Amount: toAmount(opts.amount)};
   if (opts.finishAfter) tx.FinishAfter = toRippleTime(opts.finishAfter);
   if (opts.cancelAfter) tx.CancelAfter = toRippleTime(opts.cancelAfter);

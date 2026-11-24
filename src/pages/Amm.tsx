@@ -1,4 +1,4 @@
-import {useCallback, useEffect, useMemo, useState} from 'react';
+import {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {useTranslation} from 'react-i18next';
 import {TxStatus} from '../components/TxStatus';
 import {assetKey, currencyLabel, fmtCode, fmtDateTime, fmtFixed, fmtNum, realCode, round, short} from '../core/format';
@@ -63,20 +63,34 @@ export function Amm() {
   const ledger = useCallback((a: PoolAsset) => ({currency: a.code === nativeCode ? 'XRP' : a.code, issuer: a.issuer || undefined}), [nativeCode]);
   const sameAsset = pair.a === pair.b;
 
-  const [amm, setAmm] = useState<AmmInfo | null>(null);
+  // A loaded pool is only used for the pair it was loaded for, so actions can't hit the previous one.
+  const pairKey = `${pair.a}|${pair.b}`;
+  const [pool, setPool] = useState<{key: string; info: AmmInfo | null; error: string} | null>(null);
   const [loading, setLoading] = useState(false);
-  const [loaded, setLoaded] = useState(false);
+  const requestId = useRef(0);
+  const current = pool?.key === pairKey ? pool : null;
+  const amm = current?.info ?? null;
+  const loaded = !!current;
+  const poolError = current?.error ?? '';
 
   const refresh = useCallback(async () => {
+    const id = ++requestId.current;
     if (sameAsset) {
-      setAmm(null);
+      setPool(null);
+      setLoading(false);
       return;
     }
     setLoading(true);
-    const data = await getAmm(ledger(asset(pair.a)), ledger(asset(pair.b)));
-    setAmm(data);
+    let info: AmmInfo | null = null;
+    let error = '';
+    try {
+      info = await getAmm(ledger(asset(pair.a)), ledger(asset(pair.b)));
+    } catch (err) {
+      error = (err as Error).message;
+    }
+    if (id !== requestId.current) return;
+    setPool({key: `${pair.a}|${pair.b}`, info, error});
     setLoading(false);
-    setLoaded(true);
   }, [pair, sameAsset, asset, ledger]);
 
   useEffect(() => {
@@ -90,6 +104,10 @@ export function Amm() {
 
   const changePair = (next: {a: string; b: string}) => {
     setPair(next);
+    // Amounts typed for one pool must not carry over to another.
+    setDep(d => ({...d, amt1: '', amt2: '', singleAmt: ''}));
+    setWd({lp: '', all: false});
+    setBid(b => ({...b, min: '', max: ''}));
     const a = asset(next.a), b = asset(next.b);
     setTradePair({base_code: a.code, base_issuer: a.issuer || '', counter_code: b.code, counter_issuer: b.issuer || ''});
   };
@@ -171,6 +189,7 @@ export function Amm() {
 
       {sameAsset && <div className="alert alert-warning mb-16"><i className="fa fa-exclamation-triangle" /><span>{t('amm_same_asset')}</span></div>}
       {loading && !amm && <div className="loading-row"><span className="spinner" /> {t('loading')}</div>}
+      {poolError && <div className="alert alert-error mb-16"><i className="fa fa-exclamation-circle" /><span>{t(poolError)}</span></div>}
 
       {amm && (
         <div className="grid-main">
@@ -180,11 +199,13 @@ export function Amm() {
                 <div className="stat-label">{code(amm.amount)} {t('in_pool')}</div>
                 <div className="stat-value">{fmtNum(amm.amount.value)}</div>
                 <div className="stat-hint">1 {code(amm.amount)} = {rate2} {code(amm.amount2)}</div>
+                {amm.amount.issuer && <div className="stat-hint mono break">{t('issuer')}: {amm.amount.issuer}</div>}
               </div>
               <div className="card stat">
                 <div className="stat-label">{code(amm.amount2)} {t('in_pool')}</div>
                 <div className="stat-value">{fmtNum(amm.amount2.value)}</div>
                 <div className="stat-hint">1 {code(amm.amount2)} = {rate} {code(amm.amount)}</div>
+                {amm.amount2.issuer && <div className="stat-hint mono break">{t('issuer')}: {amm.amount2.issuer}</div>}
               </div>
             </div>
 
@@ -358,7 +379,7 @@ export function Amm() {
         </div>
       )}
 
-      {loaded && !amm && !loading && !sameAsset && (
+      {loaded && !amm && !poolError && !loading && !sameAsset && (
         <div className="grid-main">
           <div className="card">
             <div className="card-header"><div><div className="card-title">{t('create_pool')}</div><div className="card-sub">{t('no_pool_desc')}</div></div></div>

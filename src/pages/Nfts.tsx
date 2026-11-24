@@ -1,4 +1,4 @@
-import {Fragment, useEffect, useState, type FormEvent} from 'react';
+import {Fragment, useEffect, useRef, useState, type FormEvent} from 'react';
 import {useTranslation} from 'react-i18next';
 import {convertHexToString, dropsToXrp, type Amount} from 'xrpl';
 import {LoadError} from '../components/Common';
@@ -12,9 +12,11 @@ import {useTx} from '../hooks/useTx';
 import {openExternal} from '../platform/desktop';
 import {useAccount} from '../state/account';
 import {useApp} from '../state/app';
+import {askConfirm} from '../state/confirm';
 import {copy} from '../state/toasts';
-import {acceptNFTOffer, burnNFT, cancelNFTOffers, createNFTOffer, getNFTOffers, getNFTOffersCreated, getNFTs, mintNFT} from '../xrpl/api';
+import {acceptNFTOffer, burnNFT, cancelNFTOffers, checkNFTOffer, createNFTOffer, getNFTOffers, getNFTOffersCreated, getNFTs, mintNFT} from '../xrpl/api';
 import {toAmount} from '../xrpl/amounts';
+import type {OfferCheck, ShownOffer} from '../xrpl/nftGuard';
 import {cachedMeta, loadMeta, type NftMeta} from '../xrpl/nftmeta';
 
 const FLAGS = {burnable: 0x0001, onlyXRP: 0x0002, trustLine: 0x0004, transferable: 0x0008} as const;
@@ -103,12 +105,18 @@ export function Nfts() {
   const [detailTab, setDetailTab] = useState<'info' | 'offers' | 'sell'>('info');
   const [offerForm, setOfferForm] = useState({amount: '', destination: '', expiration: '', transfer: false});
 
+  const [offerCheck, setOfferCheck] = useState({working: false, error: ''});
+  // A slow reply for one NFT must not show its offers under another.
+  const offersRequest = useRef(0);
+
   const loadOffers = async (nft: Nft) => {
+    const id = ++offersRequest.current;
     setOffers(null);
     try {
-      setOffers(await getNFTOffers(nft.NFTokenID));
+      const found = await getNFTOffers(nft.NFTokenID);
+      if (id === offersRequest.current) setOffers(found);
     } catch (err) {
-      setOffers({sell: [], buy: [], error: (err as Error).message});
+      if (id === offersRequest.current) setOffers({sell: [], buy: [], error: (err as Error).message});
     }
   };
 
@@ -127,15 +135,17 @@ export function Nfts() {
     setSelected(nft);
     setDetailTab('info');
     setOfferForm({amount: '', destination: '', expiration: '', transfer: false});
+    setOfferCheck({working: false, error: ''});
     void loadOffers(nft);
   };
 
   const name = (nft: Nft) => meta[nft.NFTokenID]?.name || `#${nft.nft_serial}`;
   // Token amounts include their issuer, so a token named like XRP can't pass for XRP.
-  const amountText = (amount: Amount) => {
+  const amountText = (amount: Amount, fullIssuer = false) => {
     if (typeof amount !== 'object') return `${fmtNum(Number(dropsToXrp(amount)))} ${code}`;
     const token = amount as {currency: string; issuer?: string; value: string};
-    return `${fmtNum(token.value)} ${currencyLabel(token.currency, code)}${token.issuer ? ` (${short(token.issuer, 6, 4)})` : ''}`;
+    const issuer = token.issuer && (fullIssuer ? token.issuer : short(token.issuer, 6, 4));
+    return `${fmtNum(token.value)} ${currencyLabel(token.currency, code)}${issuer ? ` (${issuer})` : ''}`;
   };
 
   const createSellOffer = (e: FormEvent) => {
@@ -148,15 +158,35 @@ export function Nfts() {
   };
 
   const burn = async () => {
-    if (!selected || !window.confirm(t('burn_confirm'))) return;
+    if (!selected || !(await askConfirm(t('burn_confirm')))) return;
     const hash = await tx.run('burn', () => burnNFT(selected.NFTokenID));
     if (hash) setSelected(null);
   };
 
-  const accept = (offer: NftOffer, isSell: boolean) => {
-    if (!window.confirm(t('nft_accept_confirm', {amount: amountText(offer.amount)}))) return;
+  const accept = async (offer: NftOffer, isSell: boolean, nftId: string) => {
+    if (offerCheck.working || tx.busy('accept')) return;
+    setOfferCheck({working: true, error: ''});
+    let check: OfferCheck;
+    try {
+      check = await checkNFTOffer({
+        id: offer.nft_offer_index, nftId, owner: offer.owner, amount: offer.amount as ShownOffer['amount'],
+        sell: isSell, destination: offer.destination
+      });
+      setOfferCheck({working: false, error: ''});
+    } catch (err) {
+      setOfferCheck({working: false, error: (err as Error).message});
+      return;
+    }
+    const question = t('nft_accept_confirm', {amount: amountText(offer.amount, true)});
+    const warning = check === 'single_server' ? ` ${t('nft_offer_single_server')}` : '';
+    if (!(await askConfirm(question + warning))) return;
     void tx.run('accept', () => acceptNFTOffer(isSell ? {sellOffer: offer.nft_offer_index} : {buyOffer: offer.nft_offer_index}));
   };
+  const offerCheckNote = offerCheck.working
+    ? <div className="loading-row"><span className="spinner" /> {t('nft_offer_checking')}</div>
+    : offerCheck.error
+      ? <div className="alert alert-error"><i className="fa fa-exclamation-circle" /><span className="grow break">{t(offerCheck.error)}</span></div>
+      : null;
   const cancelOffer = (id: string) => void tx.run('cancel', () => cancelNFTOffers([id]));
 
   const [mint, setMint] = useState({uri: '', taxon: '0', transferFee: '', burnable: false, onlyXRP: false, transferable: true, issuer: ''});
@@ -173,17 +203,21 @@ export function Nfts() {
   };
 
   const [buy, setBuy] = useState({nftId: '', owner: '', amount: '', expiration: ''});
-  const [lookup, setLookup] = useState<{loading: boolean; error: string; offers: {sell: NftOffer[]; buy: NftOffer[]} | null}>({loading: false, error: '', offers: null});
+  const [lookup, setLookup] = useState<{loading: boolean; error: string; nftId: string; offers: {sell: NftOffer[]; buy: NftOffer[]} | null}>({loading: false, error: '', nftId: '', offers: null});
+  const lookupRequest = useRef(0);
   const lookupOffers = async () => {
     const id = buy.nftId.trim();
-    setLookup({loading: true, error: '', offers: null});
+    const request = ++lookupRequest.current;
+    setOfferCheck({working: false, error: ''});
+    setLookup({loading: true, error: '', nftId: id, offers: null});
     try {
       const found = await getNFTOffers(id);
-      setLookup({loading: false, error: '', offers: found});
+      if (request !== lookupRequest.current) return;
+      setLookup({loading: false, error: '', nftId: id, offers: found});
       const owner = found.sell[0]?.owner;
       if (owner && !buy.owner) setBuy(b => ({...b, owner}));
     } catch (err) {
-      setLookup({loading: false, error: (err as Error).message, offers: null});
+      if (request === lookupRequest.current) setLookup({loading: false, error: (err as Error).message, nftId: id, offers: null});
     }
   };
   const submitBuy = (e: FormEvent) => {
@@ -361,7 +395,7 @@ export function Nfts() {
                   {lookup.offers.sell.map(o => (
                     <div className="summary-row" key={o.nft_offer_index}>
                       <span className="k">{t('sell')} · {short(o.owner, 6, 4)}</span>
-                      <span className="v">{amountText(o.amount)} <a className="btn btn-soft btn-xs" onClick={() => !readOnly && accept(o, true)}>{t('accept')}</a></span>
+                      <span className="v">{amountText(o.amount)} <a className="btn btn-soft btn-xs" onClick={() => !readOnly && accept(o, true, lookup.nftId)}>{t('accept')}</a></span>
                     </div>
                   ))}
                   {lookup.offers.buy.map(o => (
@@ -371,6 +405,7 @@ export function Nfts() {
                 </div>
               )}
               {lookup.error && <div className="text-danger text-sm">{lookup.error}</div>}
+              {tab === 'buy' && !selected && offerCheckNote}
               <TxStatus state={tx.status.buy} />
               <TxStatus state={tx.status.accept} />
               <button className="btn btn-primary" type="submit" disabled={tx.busy('buy') || readOnly || !validId(buy.nftId) || !isValidAddress(buy.owner) || !(Number(buy.amount) > 0)}>
@@ -428,7 +463,7 @@ export function Nfts() {
                   <dt>{t('flags')}</dt>
                   <dd>{selected.flagList.length ? selected.flagList.map(f => <span key={f} className="badge mr-4">{t('flag_' + f)}</span>) : '—'}</dd>
                   <dt>{t('nft_uri')}</dt><dd className="mono break">{selected.uri || '—'}</dd>
-                  {(selectedMeta.attributes || []).map((a, i) => (
+                  {(selectedMeta.attributes || []).filter(a => a && typeof a === 'object').map((a, i) => (
                     <Fragment key={i}><dt>{String(a.trait_type ?? '')}</dt><dd>{String(a.value ?? '')}</dd></Fragment>
                   ))}
                 </dl>
@@ -437,6 +472,7 @@ export function Nfts() {
               {detailTab === 'offers' && (
                 <div className="stack-sm">
                   {!offers && <div className="loading-row"><span className="spinner" /></div>}
+                  {offerCheckNote}
                   <TxStatus state={tx.status.accept} />
                   <TxStatus state={tx.status.cancel} />
                   {offers && (
@@ -446,7 +482,7 @@ export function Nfts() {
                         <div className="summary-row" key={o.nft_offer_index}>
                           <span className="k mono">{short(o.owner, 6, 4)}</span>
                           <span className="v">{amountText(o.amount)}{' '}
-                            <button type="button" className="btn btn-soft btn-xs" onClick={() => accept(o, false)} disabled={readOnly}>{t('accept')}</button>{' '}
+                            <button type="button" className="btn btn-soft btn-xs" onClick={() => void accept(o, false, selected.NFTokenID)} disabled={readOnly || offerCheck.working}>{t('accept')}</button>{' '}
                             {o.owner === address && <button type="button" className="btn btn-danger-soft btn-xs" onClick={() => cancelOffer(o.nft_offer_index)}>{t('offer_cancel')}</button>}
                           </span>
                         </div>

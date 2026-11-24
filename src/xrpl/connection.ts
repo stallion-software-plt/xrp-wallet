@@ -6,6 +6,7 @@ import {useApp} from '../state/app';
 
 const CONNECT_TIMEOUT_MS = 30000;
 const WAIT_FOR_CLIENT_MS = 20000;
+const CHECK_TIMEOUT_MS = 10000;
 const PATH_NODES = ['xrpl.ws', 'xrplcluster.com'];
 
 let clients: Client[] = [];
@@ -118,6 +119,28 @@ export async function getClient(): Promise<Client> {
 export async function getPathClient(): Promise<Client> {
   if (pathNode?.isConnected()) return pathNode;
   return getClient();
+}
+
+export type ServerAnswer<T> = {result: T} | {error: unknown};
+
+async function askServer<T>(url: string, req: Record<string, unknown>): Promise<ServerAnswer<T>> {
+  const client = new Client(url, {connectionTimeout: CHECK_TIMEOUT_MS, timeout: CHECK_TIMEOUT_MS});
+  client.on('error', () => {});
+  try {
+    await client.connect();
+    return {result: (await client.request(req as any)).result as T};
+  } catch (error) {
+    return {error};
+  } finally {
+    if (client.isConnected()) void client.disconnect().catch(() => {});
+  }
+}
+
+/** Asks every other server from Settings, each on its own short connection. */
+export async function askOtherServers<T>(req: Record<string, unknown>): Promise<Array<ServerAnswer<T>>> {
+  const current = await getClient();
+  const urls = [...new Set(clients.map(c => c.url))].filter(url => url !== current.url);
+  return Promise.all(urls.map(url => askServer<T>(url, req)));
 }
 
 export function activeClient(): Client | null {

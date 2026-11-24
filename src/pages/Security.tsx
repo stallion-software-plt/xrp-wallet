@@ -9,6 +9,7 @@ import * as session from '../core/session';
 import {openExternal} from '../platform/desktop';
 import {useAccount} from '../state/account';
 import {accountUrl, useApp} from '../state/app';
+import {askConfirm} from '../state/confirm';
 import {copy} from '../state/toasts';
 
 export function Security() {
@@ -24,8 +25,8 @@ export function Security() {
 
   useEffect(() => () => setSecrets(null), []);
 
-  const show = () => {
-    if (window.confirm(t('are_you_sure_secret'))) setSecrets(session.revealSecrets());
+  const show = async () => {
+    if (await askConfirm(t('are_you_sure_secret'))) setSecrets(session.revealSecrets());
   };
   const hide = () => {
     setSecrets(null);
@@ -90,7 +91,7 @@ export function Security() {
                 <div className="cluster">
                   {secrets
                     ? <button type="button" className="btn btn-secondary" onClick={hide}><i className="fa fa-eye-slash" /> {t('hide_secret')}</button>
-                    : <button type="button" className="btn btn-primary" onClick={show}><i className="fa fa-eye" /> {t('show_secret')}</button>}
+                    : <button type="button" className="btn btn-primary" onClick={() => void show()}><i className="fa fa-eye" /> {t('show_secret')}</button>}
                 </div>
               </div>
             </div>

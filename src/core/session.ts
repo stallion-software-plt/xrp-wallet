@@ -4,7 +4,7 @@
 import {signPaymentChannelClaim, type SubmittableTransaction, type Wallet} from 'xrpl';
 import {walletFromSecret} from './id';
 import {decryptWallet, encryptWallet, forgetDerivedKeys, PBKDF2_ITERATIONS, walletIterations, type Contact, type WalletData} from './walletFile';
-import {readTextFile, writeTextFile, type FileRef} from '../platform/files';
+import {createTextFile, readTextFile, writeTextFile, type FileRef} from '../platform/files';
 
 interface FileSession {
   kind: 'file';
@@ -83,7 +83,7 @@ export async function openFile(ref: FileRef, password: string): Promise<void> {
 export async function createFile(path: string, password: string, secret: string, mnemonic: string): Promise<WalletData> {
   const wallet = walletFromSecret(secret);
   const data: WalletData = {address: wallet.classicAddress, secret: secret.trim(), mnemonic, contacts: [], created: new Date().toJSON()};
-  await writeTextFile(path, encryptWallet(password, data));
+  await createTextFile(path, encryptWallet(password, data));
   return data;
 }
 

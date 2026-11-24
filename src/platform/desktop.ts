@@ -58,6 +58,39 @@ export async function readClipboardText(): Promise<string | null> {
   }
 }
 
+/** Clears the clipboard if it still holds `text`. In NW.js this finishes before the first await, so
+ *  it also works while the window is closing. */
+export async function clearClipboardIfHolding(text: string): Promise<void> {
+  if (nw?.Clipboard) {
+    const clipboard = nw.Clipboard.get();
+    let current: string | null = null;
+    try {
+      current = clipboard.get('text') ?? '';
+    } catch {
+      // Unreadable: clear it to be safe.
+    }
+    if (current === null || current === text) clipboard.clear();
+    return;
+  }
+  const current = await readClipboardText();
+  if (current === null || current === text) await clearClipboard();
+}
+
+/** Runs `cleanup` when the app window closes or reloads. */
+export function onWindowClose(cleanup: () => void): void {
+  w.addEventListener?.('pagehide', cleanup);
+  const win = nw?.Window?.get?.();
+  if (!win) return;
+  // A close listener replaces the default action, so the window must be closed here.
+  win.on('close', () => {
+    try {
+      cleanup();
+    } finally {
+      win.close(true);
+    }
+  });
+}
+
 /** Stops Chromium from offering to save the wallet password, and forgets any it saved. */
 export function disablePasswordSaving(): void {
   const chrome = w.chrome;

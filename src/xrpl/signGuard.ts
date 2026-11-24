@@ -79,3 +79,27 @@ export function checkPrepared(original: Record<string, unknown>, prepared: Recor
     throw new Error('The server gave an unexpected ledger number. The transaction was not signed.');
   }
 }
+
+/** A ledger Mainnet has already passed. A transaction that expires before it can never apply there. */
+export const MAINNET_LEDGER_FLOOR = 108_000_000;
+
+/** Networks above this ID must put NetworkID in every signed transaction; others can't include it. */
+const MAX_NETWORK_ID_WITHOUT_FIELD = 1024;
+
+/**
+ * The same key signs on every network, so a test or custom server could ask for a transaction that
+ * is also valid on Mainnet. Off Mainnet, require a NetworkID that Mainnet rejects, or an expiry
+ * ledger Mainnet has already passed.
+ */
+export function checkNetwork(prepared: {NetworkID?: number; LastLedgerSequence?: number}, networkType: string): void {
+  const id = prepared.NetworkID;
+  if (networkType === 'xrp') {
+    if (id !== undefined) throw new Error('The server is not on Mainnet. The transaction was not signed.');
+    return;
+  }
+  if (Number.isInteger(id) && id! > MAX_NETWORK_ID_WITHOUT_FIELD) return;
+  const last = Number(prepared.LastLedgerSequence);
+  if (!Number.isSafeInteger(last) || last >= MAINNET_LEDGER_FLOOR) {
+    throw new Error('This transaction could also be valid on Mainnet. The transaction was not signed.');
+  }
+}

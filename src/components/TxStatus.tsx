@@ -14,6 +14,7 @@ export function TxStatus({state}: {state?: TxStatusState}) {
       {state.working && <div className="alert alert-info"><span className="spinner" /><span>{t('submitting')}</span></div>}
       {state.state === 'submitted' && <div className="alert alert-info"><span className="spinner" /><span className="grow">{t('tx_pending')}</span>{link}</div>}
       {state.state === 'success' && <div className="alert alert-success"><i className="fa fa-check-circle" /><span className="grow">{t('tx_success')}</span>{link}</div>}
+      {state.state === 'unknown' && <div className="alert alert-warning"><i className="fa fa-exclamation-triangle" /><span className="grow">{t('tx_unknown')}</span>{link}</div>}
       {(state.state === 'error' || state.state === 'fail') && (
         <div className="alert alert-error"><i className="fa fa-exclamation-circle" /><span className="grow break">{t(state.error || '')}</span></div>
       )}

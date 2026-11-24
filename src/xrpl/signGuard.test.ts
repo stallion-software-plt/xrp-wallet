@@ -1,5 +1,5 @@
 import {describe, expect, it} from 'vitest';
-import {checkFee, checkPrepared, feeLimitDrops, MAX_RESERVE_FEE_DROPS} from './signGuard';
+import {checkFee, checkNetwork, checkPrepared, feeLimitDrops, MAINNET_LEDGER_FLOOR, MAX_RESERVE_FEE_DROPS} from './signGuard';
 
 const limits = {maxFeeXRP: '0.2', reserveIncXRP: 0.2};
 
@@ -74,5 +74,39 @@ describe('prepared transaction check', () => {
     expect(() => checkPrepared(original, {...original, ...filled, LastLedgerSequence: 1051}, 1000)).toThrow('ledger number');
     expect(() => checkPrepared(original, {...original, ...filled, LastLedgerSequence: 999}, 1000)).toThrow('ledger number');
     expect(() => checkPrepared(original, {...original, ...filled, LastLedgerSequence: undefined}, 1000)).toThrow('ledger number');
+  });
+});
+
+describe('network replay check', () => {
+  const aboveFloor = MAINNET_LEDGER_FLOOR + 500_000;
+
+  it('accepts Mainnet transactions without a NetworkID', () => {
+    expect(() => checkNetwork({LastLedgerSequence: aboveFloor}, 'xrp')).not.toThrow();
+  });
+
+  it('rejects a NetworkID on Mainnet', () => {
+    expect(() => checkNetwork({NetworkID: 21337, LastLedgerSequence: aboveFloor}, 'xrp')).toThrow('not signed');
+  });
+
+  it('accepts test network ledgers that Mainnet has already passed', () => {
+    expect(() => checkNetwork({LastLedgerSequence: 22_525_131}, 'xrpTestnet')).not.toThrow();
+    expect(() => checkNetwork({LastLedgerSequence: 7_157_752}, 'xrpTest')).not.toThrow();
+  });
+
+  it('rejects a test or custom server that supplies a Mainnet-range ledger', () => {
+    for (const type of ['xrpTestnet', 'xrpTest', 'xag', 'other']) {
+      expect(() => checkNetwork({LastLedgerSequence: aboveFloor}, type)).toThrow('valid on Mainnet');
+      expect(() => checkNetwork({LastLedgerSequence: MAINNET_LEDGER_FLOOR}, type)).toThrow('valid on Mainnet');
+      expect(() => checkNetwork({NetworkID: 1, LastLedgerSequence: aboveFloor}, type)).toThrow('valid on Mainnet');
+      expect(() => checkNetwork({NetworkID: 1024, LastLedgerSequence: aboveFloor}, type)).toThrow('valid on Mainnet');
+    }
+  });
+
+  it('accepts any ledger when the signature carries a NetworkID Mainnet rejects', () => {
+    expect(() => checkNetwork({NetworkID: 1025, LastLedgerSequence: aboveFloor}, 'other')).not.toThrow();
+  });
+
+  it('rejects a missing expiry off Mainnet', () => {
+    expect(() => checkNetwork({}, 'xrpTestnet')).toThrow('valid on Mainnet');
   });
 });

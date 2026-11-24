@@ -11,6 +11,7 @@ import {useTx} from '../hooks/useTx';
 import {useAccount} from '../state/account';
 import {useApp} from '../state/app';
 import {cancelEscrow, createEscrow, finishEscrow, getEscrows} from '../xrpl/api';
+import {escrowProblem} from '../xrpl/escrowGuard';
 
 interface EscrowRow {
   index: string;
@@ -56,24 +57,24 @@ export function Escrow() {
   }, {out: 0, incoming: 0});
 
   const [form, setForm] = useState({destination: '', amount: '', finishAfter: '', cancelAfter: '', condition: '', destinationTag: ''});
-  const set = (field: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement>) => setForm(f => ({...f, [field]: e.target.value}));
-  const formValid = (() => {
-    const f = form;
-    if (!isValidAddress(f.destination) || !(Number(f.amount) > 0)) return false;
-    // The ledger needs a release time or a condition, and at least one of the two times.
-    if (!f.finishAfter && !f.condition) return false;
-    if (!f.finishAfter && !f.cancelAfter) return false;
-    if (f.finishAfter && f.cancelAfter && new Date(f.cancelAfter) <= new Date(f.finishAfter)) return false;
-    return true;
-  })();
+  // Refreshed on each edit and again on submit, so a date that has since passed is caught.
+  const [now, setNow] = useState(() => Date.now());
+  const set = (field: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement>) => {
+    setNow(Date.now());
+    setForm(f => ({...f, [field]: e.target.value}));
+  };
+  const problem = escrowProblem(form, now);
+  const formValid = isValidAddress(form.destination) && Number(form.amount) > 0 && !problem;
 
   const submitCreate = async (e: FormEvent) => {
     e.preventDefault();
-    if (!formValid) return;
+    const submittedAt = Date.now();
+    setNow(submittedAt);
+    if (!formValid || escrowProblem(form, submittedAt)) return;
     const hash = await tx.run('create', () => createEscrow({
       destination: form.destination.trim(), amount: form.amount,
       finishAfter: form.finishAfter || undefined, cancelAfter: form.cancelAfter || undefined,
-      condition: form.condition || undefined, destinationTag: form.destinationTag || undefined
+      condition: form.condition.trim() || undefined, destinationTag: form.destinationTag || undefined
     }));
     if (hash) setForm(f => ({...f, amount: '', condition: ''}));
   };
@@ -194,6 +195,7 @@ export function Escrow() {
                 <div className="hint">{t('crypto_condition_hint')}</div>
               </div>
             </details>
+            {problem && problem !== 'escrow_incomplete' && <div className="form-error">{t(problem)}</div>}
             <div className="alert alert-info"><i className="fa fa-info-circle" /><span>{t('escrow_reserve_hint')}</span></div>
             <TxStatus state={tx.status.create} />
             <button className="btn btn-primary" type="submit" disabled={!formValid || tx.busy('create') || readOnly}><i className="fa fa-lock" /> {t('create_escrow')}</button>

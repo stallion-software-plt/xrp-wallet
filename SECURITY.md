@@ -47,7 +47,8 @@ Out of scope:
 
 - Secret keys and recovery phrases are stored only in a wallet file on your computer, encrypted with
   your password (AES-256-CCM with PBKDF2-HMAC-SHA256, 600,000 iterations). New passwords need at least
-  10 characters. The file is replaced atomically when saved and, on macOS and Linux, readable only by
+  12 characters, and common or patterned passwords are refused. Creating a wallet never replaces an
+  existing file. The file is replaced atomically when saved and, on macOS and Linux, readable only by
   you.
 - While a wallet is open, the decrypted data is kept in the app's memory only, never in browser
   storage or other files. Logging out also clears derived encryption keys. The wallet locks after 5
@@ -55,7 +56,8 @@ Out of scope:
 - Transactions are signed on your computer. Only signed transactions are sent to the XRPL servers.
   Before signing, the app checks what the server filled in: only the fee, sequence number and expiry
   ledger may be added, the fee must be within your limit (or, for account deletion and AMM creation,
-  the ledger's reserve), and the expiry must be close to the current ledger.
+  the ledger's reserve), and the expiry must be close to the current ledger. Off Mainnet, a transaction
+  is signed only if it can't also be valid on Mainnet.
 - Activity flags tiny payments from unknown addresses and senders whose address imitates a contact
   or your own (address poisoning), and Send warns before paying such a look-alike address.
 - The app's page runs under a Content Security Policy that only allows the app's own scripts, and web
