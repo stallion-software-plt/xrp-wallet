@@ -25,7 +25,7 @@
     "@scure/bip39": "^2.4.0",
     "bignumber.js": "^11.1.5",
     "font-awesome": "^4.7.0",
-    "i18next": "^26.5.3",
+    "i18next": "^27.2.6",
     "qrcode.react": "^4.2.0",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",
